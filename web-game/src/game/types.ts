@@ -135,7 +135,7 @@ export interface ShopUpgradeDef {
 
 export type PlaceId =
   | 'sunlit_meadow'
-  | 'whisper_woods'
+  | 'whisper_Wela'
   | 'black_fen'
   | 'ruined_tower'
   | 'frostpeak_pass'

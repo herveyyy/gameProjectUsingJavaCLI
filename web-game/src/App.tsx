@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
 import './App.css'
 import { AdventurerPortrait, IconCoin, IconFullscreen, IconXpSpark, ShopIcon } from './components/GameIcons'
 import {
@@ -45,6 +46,7 @@ import {
 import { rollBattleLoot } from './game/loot'
 import { SALVAGE_BY_ID, addSalvageStacks, rollSalvageLoot } from './game/salvage'
 import { clearProgress, hasSavedGame, loadProgress, saveProgress } from './game/storage'
+import { warmGameCaches } from './game/warmup'
 import type {
   BattleState,
   EnemyState,
@@ -57,6 +59,18 @@ import type {
 } from './game/types'
 
 type Screen = 'menu' | 'game'
+
+type ShopStockFilter = 'all' | 'consumables' | 'upgrades' | EquipmentSlotId
+
+function isGearSlotStockFilter(f: ShopStockFilter): f is EquipmentSlotId {
+  return f !== 'all' && f !== 'consumables' && f !== 'upgrades'
+}
+
+function shopTextMatches(query: string, ...texts: string[]): boolean {
+  const needle = query.trim().toLowerCase()
+  if (!needle) return true
+  return texts.some((t) => t.toLowerCase().includes(needle))
+}
 
 function fmt(n: number) {
   return Number.isInteger(n) ? String(n) : n.toFixed(1)
@@ -77,6 +91,10 @@ export default function App() {
   const [logLines, setLogLines] = useState<string[]>([
     "Unknown Entity: What's your name, human?",
   ])
+  const [splashPhase, setSplashPhase] = useState<'enter' | 'leaving' | 'gone'>('enter')
+  const [shopStockFilter, setShopStockFilter] = useState<ShopStockFilter>('all')
+  const [shopSearchQuery, setShopSearchQuery] = useState('')
+  const [gameBooting, setGameBooting] = useState(false)
 
   const appendLog = useCallback((line: string) => {
     setLogLines((prev) => [...prev, line])
@@ -97,6 +115,31 @@ export default function App() {
     document.addEventListener('fullscreenchange', sync)
     return () => document.removeEventListener('fullscreenchange', sync)
   }, [])
+
+  useEffect(() => {
+    const tLeave = window.setTimeout(() => setSplashPhase('leaving'), 1850)
+    const tGone = window.setTimeout(() => setSplashPhase('gone'), 2520)
+    return () => {
+      clearTimeout(tLeave)
+      clearTimeout(tGone)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (splashPhase !== 'gone') return
+    let idle: ReturnType<typeof requestIdleCallback> | undefined
+    let timer: number | undefined
+    const run = () => warmGameCaches(loadProgress())
+    if (typeof requestIdleCallback !== 'undefined') {
+      idle = requestIdleCallback(run, { timeout: 3200 })
+    } else {
+      timer = window.setTimeout(run, 400)
+    }
+    return () => {
+      if (idle !== undefined && typeof cancelIdleCallback !== 'undefined') cancelIdleCallback(idle)
+      if (timer !== undefined) window.clearTimeout(timer)
+    }
+  }, [splashPhase])
 
   const toggleBrowserFullscreen = useCallback(() => {
     const go = async () => {
@@ -142,39 +185,57 @@ export default function App() {
   }, [goToMenu, player])
 
   const handlePlay = useCallback(() => {
-    const saved = loadProgress()
-    setScreen('game')
-    if (saved) {
-      setPlayer(saved)
-      setPlayerNameInput(saved.name)
-      setPhase('adventure')
-      setEnemy(null)
-      setBattle(null)
-      setLogLines([
-        `Welcome back, ${saved.name}!`,
-        'Saved progress loaded from this browser.',
-        'Choose a destination — each region shows recommended levels.',
-      ])
-    } else {
-      setPlayer(null)
-      setPlayerNameInput('')
-      setPhase('name')
-      setEnemy(null)
-      setBattle(null)
-      setLogLines(["Unknown Entity: What's your name, human?"])
-    }
+    flushSync(() => setGameBooting(true))
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const saved = loadProgress()
+        warmGameCaches(saved)
+        flushSync(() => {
+          setScreen('game')
+          if (saved) {
+            setPlayer(saved)
+            setPlayerNameInput(saved.name)
+            setPhase('adventure')
+            setEnemy(null)
+            setBattle(null)
+            setLogLines([
+              `Welcome back, ${saved.name}!`,
+              'Saved progress loaded from this browser.',
+              'Choose a destination — each region shows recommended levels.',
+            ])
+          } else {
+            setPlayer(null)
+            setPlayerNameInput('')
+            setPhase('name')
+            setEnemy(null)
+            setBattle(null)
+            setLogLines(["Unknown Entity: What's your name, human?"])
+          }
+          setGameBooting(false)
+        })
+      })
+    })
   }, [])
 
   const handleNewGame = useCallback(() => {
-    clearProgress()
-    setHasSave(false)
-    setScreen('game')
-    setPlayer(null)
-    setPlayerNameInput('')
-    setEnemy(null)
-    setBattle(null)
-    setPhase('name')
-    setLogLines(["Unknown Entity: What's your name, human?"])
+    flushSync(() => setGameBooting(true))
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        clearProgress()
+        warmGameCaches(null)
+        flushSync(() => {
+          setHasSave(false)
+          setScreen('game')
+          setPlayer(null)
+          setPlayerNameInput('')
+          setEnemy(null)
+          setBattle(null)
+          setPhase('name')
+          setLogLines(["Unknown Entity: What's your name, human?"])
+          setGameBooting(false)
+        })
+      })
+    })
   }, [])
 
   const beginAdventure = useCallback(() => {
@@ -459,6 +520,20 @@ export default function App() {
   const effStats = player ? getEffectiveStats(player) : null
   const xpPct = player && player.xpToNext > 0 ? Math.min(100, (player.xp / player.xpToNext) * 100) : 0
 
+  const playMood = useMemo((): 'adventure' | 'shop' | 'gear' | 'battle' => {
+    if (phase === 'shop') return 'shop'
+    if (phase === 'gear') return 'gear'
+    if (
+      phase === 'battle_menu' ||
+      phase === 'pick_skill' ||
+      phase === 'use_item_battle' ||
+      phase === 'confirm_home'
+    ) {
+      return 'battle'
+    }
+    return 'adventure'
+  }, [phase])
+
   const actions = useMemo(() => {
     if (phase === 'name') {
       return (
@@ -480,28 +555,29 @@ export default function App() {
     if (phase === 'adventure') {
       return (
         <>
-          <div className="rpg-places-section">
+          <div className="rpg-places-section rpg-places-section--immersive">
             <h3 className="rpg-places-heading">Choose a destination</h3>
             <div className="rpg-places-scroll">
-            <div className="rpg-places-grid">
-              {PLACES.map((place) => {
-                const risky = player ? player.level < place.levelMin : false
-                const ideal =
-                  player && player.level >= place.levelMin && player.level <= place.levelMax
-                return (
-                  <button
-                    type="button"
-                    key={place.id}
-                    className={`rpg-place-card${risky ? ' rpg-place-risky' : ''}${ideal ? ' rpg-place-ideal' : ''}`}
-                    onClick={() => beginEncounterAt(place)}
-                  >
-                    <span className="rpg-place-name">{place.name}</span>
-                    <span className="rpg-place-rec">Rec. Lv {place.levelRecommended}</span>
-                    <span className="rpg-place-desc">{place.description}</span>
-                  </button>
-                )
-              })}
-            </div>
+              <div className="rpg-places-grid">
+                {PLACES.map((place, idx) => {
+                  const risky = player ? player.level < place.levelMin : false
+                  const ideal =
+                    player && player.level >= place.levelMin && player.level <= place.levelMax
+                  return (
+                    <button
+                      type="button"
+                      key={place.id}
+                      className={`rpg-place-card${risky ? ' rpg-place-risky' : ''}${ideal ? ' rpg-place-ideal' : ''}`}
+                      style={{ animationDelay: `${idx * 42}ms` }}
+                      onClick={() => beginEncounterAt(place)}
+                    >
+                      <span className="rpg-place-name">{place.name}</span>
+                      <span className="rpg-place-rec">Rec. Lv {place.levelRecommended}</span>
+                      <span className="rpg-place-desc">{place.description}</span>
+                    </button>
+                  )
+                })}
+              </div>
             </div>
           </div>
           <div className="rpg-actions">
@@ -519,23 +595,25 @@ export default function App() {
             </button>
           </div>
           {player && (player.inventory.healthPotion > 0 || player.inventory.manaDraught > 0 || player.inventory.staminaBrew > 0) && (
-            <div className="rpg-inventory-actions">
-              <span className="rpg-inventory-label">Tonics</span>
-              {player.inventory.healthPotion > 0 && (
-                <button type="button" className="rpg-tiny" onClick={() => usePotionAdventure('hp')}>
-                  Red ×{player.inventory.healthPotion}
-                </button>
-              )}
-              {player.inventory.manaDraught > 0 && (
-                <button type="button" className="rpg-tiny" onClick={() => usePotionAdventure('mana')}>
-                  Blue ×{player.inventory.manaDraught}
-                </button>
-              )}
-              {player.inventory.staminaBrew > 0 && (
-                <button type="button" className="rpg-tiny" onClick={() => usePotionAdventure('sta')}>
-                  Green ×{player.inventory.staminaBrew}
-                </button>
-              )}
+            <div className="rpg-adventure-inventory">
+              <div className="rpg-inventory-actions">
+                <span className="rpg-inventory-label">Tonics</span>
+                {player.inventory.healthPotion > 0 && (
+                  <button type="button" className="rpg-tiny" onClick={() => usePotionAdventure('hp')}>
+                    Red ×{player.inventory.healthPotion}
+                  </button>
+                )}
+                {player.inventory.manaDraught > 0 && (
+                  <button type="button" className="rpg-tiny" onClick={() => usePotionAdventure('mana')}>
+                    Blue ×{player.inventory.manaDraught}
+                  </button>
+                )}
+                {player.inventory.staminaBrew > 0 && (
+                  <button type="button" className="rpg-tiny" onClick={() => usePotionAdventure('sta')}>
+                    Green ×{player.inventory.staminaBrew}
+                  </button>
+                )}
+              </div>
             </div>
           )}
         </>
@@ -729,10 +807,120 @@ export default function App() {
     usePotionAdventure,
   ])
 
+  const filteredShopConsumables = useMemo(() => {
+    return SHOP_CONSUMABLES.filter((c) => {
+      if (shopStockFilter !== 'all' && shopStockFilter !== 'consumables') return false
+      return shopTextMatches(shopSearchQuery, c.name, c.description)
+    })
+  }, [shopStockFilter, shopSearchQuery])
+
+  const filteredShopUpgrades = useMemo(() => {
+    return SHOP_UPGRADES.filter((u) => {
+      if (shopStockFilter !== 'all' && shopStockFilter !== 'upgrades') return false
+      return shopTextMatches(shopSearchQuery, u.name, u.description)
+    })
+  }, [shopStockFilter, shopSearchQuery])
+
+  const filteredShopGear = useMemo(() => {
+    return GEAR_CATALOG.filter((g) => {
+      if (shopStockFilter !== 'all') {
+        if (!isGearSlotStockFilter(shopStockFilter)) return false
+        if (g.slot !== shopStockFilter) return false
+      }
+      return shopTextMatches(
+        shopSearchQuery,
+        g.name,
+        g.description,
+        EQUIPMENT_SLOT_LABELS[g.slot],
+        g.skill.name,
+      )
+    })
+  }, [shopStockFilter, shopSearchQuery])
+
+  const showShopConsumables = shopStockFilter === 'all' || shopStockFilter === 'consumables'
+  const showShopUpgrades = shopStockFilter === 'all' || shopStockFilter === 'upgrades'
+  const showShopGear = shopStockFilter === 'all' || isGearSlotStockFilter(shopStockFilter)
+
+  const shopHasBuyStock =
+    (showShopConsumables && filteredShopConsumables.length > 0) ||
+    (showShopUpgrades && filteredShopUpgrades.length > 0) ||
+    (showShopGear && filteredShopGear.length > 0)
+
+  const splashOverlay =
+    splashPhase !== 'gone' ? (
+      <div
+        className={`rpg-splash ${splashPhase === 'leaving' ? 'rpg-splash--out' : ''}`}
+        aria-live="polite"
+      >
+        <div className="rpg-splash__frame">
+          <p className="rpg-splash__eyebrow">Wela RPG</p>
+          <h2 className="rpg-splash__title">Frappe Text Adventure RPG</h2>
+          <p className="rpg-splash__tagline">Sharpening verbs… waxing the journal…</p>
+          <div className="rpg-splash__track" aria-hidden>
+            <div className="rpg-splash__track-fill" />
+          </div>
+        </div>
+      </div>
+    ) : null
+
   if (screen === 'menu') {
     return (
-      <div className="app-root app-root--fullscreen">
-        <div className="rpg-shell rpg-shell--fullscreen rpg-menu-shell">
+      <>
+        {splashOverlay}
+        {gameBooting && (
+          <div className="rpg-game-boot-overlay" role="status" aria-live="polite">
+            <div className="rpg-game-boot-card">
+              <p className="rpg-game-boot-title">Preparing your journey…</p>
+              <p className="rpg-game-boot-sub">Warming caches — gear, shop, and save data.</p>
+            </div>
+          </div>
+        )}
+        <div
+          className={`app-root app-root--fullscreen${splashPhase === 'gone' ? ' rpg-app-reveal' : ''}`}
+        >
+          <div className="rpg-shell rpg-shell--fullscreen rpg-menu-shell">
+            <button
+              type="button"
+              className="rpg-fs-btn"
+              title={browserFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+              aria-label={browserFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+              onClick={toggleBrowserFullscreen}
+              disabled={gameBooting}
+            >
+              <IconFullscreen expanded={browserFullscreen} size={20} />
+            </button>
+            <h1 className="rpg-menu-title">Frappe Text Adventure RPG</h1>
+            <p className="rpg-menu-lead">Step into the Wela. Your run is saved in this browser automatically.</p>
+            {hasSave && <p className="rpg-menu-save">Found a saved adventurer on this device.</p>}
+            <div className="rpg-menu-actions">
+              <button type="button" className="rpg-menu-play" onClick={handlePlay} disabled={gameBooting}>
+                Play
+              </button>
+              {hasSave && (
+                <button
+                  type="button"
+                  className="rpg-menu-secondary"
+                  onClick={handleNewGame}
+                  disabled={gameBooting}
+                >
+                  New game
+                </button>
+              )}
+            </div>
+            <p className="rpg-meta">Uses localStorage — clearing site data removes your save.</p>
+          </div>
+        </div>
+      </>
+    )
+  }
+
+  return (
+    <>
+      {splashOverlay}
+      <div
+        className={`app-root app-root--fullscreen${splashPhase === 'gone' ? ' rpg-app-reveal' : ''}`}
+      >
+        <div className="rpg-shell rpg-shell--fullscreen">
           <button
             type="button"
             className="rpg-fs-btn"
@@ -742,439 +930,469 @@ export default function App() {
           >
             <IconFullscreen expanded={browserFullscreen} size={20} />
           </button>
-          <h1 className="rpg-menu-title">Frappe Text Adventure RPG</h1>
-          <p className="rpg-menu-lead">Step into the woods. Your run is saved in this browser automatically.</p>
-          {hasSave && <p className="rpg-menu-save">Found a saved adventurer on this device.</p>}
-          <div className="rpg-menu-actions">
-            <button type="button" className="rpg-menu-play" onClick={handlePlay}>
-              Play
-            </button>
-            {hasSave && (
-              <button type="button" className="rpg-menu-secondary" onClick={handleNewGame}>
-                New game
-              </button>
-            )}
-          </div>
-          <p className="rpg-meta">Uses localStorage — clearing site data removes your save.</p>
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div className="app-root app-root--fullscreen">
-      <div className="rpg-shell rpg-shell--fullscreen">
-        <button
-          type="button"
-          className="rpg-fs-btn"
-          title={browserFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
-          aria-label={browserFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
-          onClick={toggleBrowserFullscreen}
-        >
-          <IconFullscreen expanded={browserFullscreen} size={20} />
-        </button>
-        {player && maxStats ? (
-          <section className="rpg-panel rpg-dashboard" aria-label="Character">
-            <div className="rpg-dashboard-top">
-              <h1 className="rpg-dashboard-title">Frappe Text Adventure RPG</h1>
-              <div className="rpg-dashboard-identity">
-                <AdventurerPortrait size={48} />
-                <div className="rpg-hud-id">
-                  <span className="rpg-hud-name">{player.name}</span>
-                  <span className="rpg-hud-class">Gear defines your kit</span>
+          {player && maxStats ? (
+            <section
+              className={`rpg-panel rpg-dashboard rpg-dashboard-mood--${playMood}`}
+              aria-label="Character"
+            >
+              <div className="rpg-dashboard-top">
+                <h1 className="rpg-dashboard-title">Frappe Text Adventure RPG</h1>
+                <div className="rpg-dashboard-identity">
+                  <AdventurerPortrait size={48} />
+                  <div className="rpg-hud-id">
+                    <span className="rpg-hud-name">{player.name}</span>
+                    <span className="rpg-hud-class">Gear defines your kit</span>
+                  </div>
+                </div>
+                <div className="rpg-dashboard-lv-gold">
+                  {(phase === 'shop' || phase === 'gear') && (
+                    <button
+                      type="button"
+                      className="rpg-dashboard-back"
+                      title="Return to the world map"
+                      onClick={() => setPhase('adventure')}
+                    >
+                      Back
+                    </button>
+                  )}
+                  <span className="rpg-hud-badge">
+                    Lv <strong>{player.level}</strong>
+                  </span>
+                  <span className="rpg-hud-gold" title="Gold">
+                    <IconCoin /> <strong>{player.gold}</strong>
+                  </span>
                 </div>
               </div>
-              <div className="rpg-dashboard-lv-gold">
-                {(phase === 'shop' || phase === 'gear') && (
-                  <button
-                    type="button"
-                    className="rpg-dashboard-back"
-                    title="Return to the world map"
-                    onClick={() => setPhase('adventure')}
-                  >
-                    Back
-                  </button>
+              <div className="rpg-dashboard-xp" title="Experience">
+                <IconXpSpark />
+                <div className="rpg-xp-bar">
+                  <div className="rpg-xp-fill" style={{ width: `${xpPct}%` }} />
+                </div>
+                <span className="rpg-xp-text">
+                  {player.xp}/{player.xpToNext} XP
+                </span>
+              </div>
+              <div className="rpg-dashboard-stats">
+                <div className="rpg-statline">
+                  <span>
+                    HP <strong>{fmt(player.hp)}</strong> / {fmt(maxStats.maxHp)}
+                  </span>
+                  <span>
+                    STA <strong>{fmt(player.stamina)}</strong> / {fmt(maxStats.maxStamina)}
+                  </span>
+                  <span>
+                    MP <strong>{fmt(player.mana)}</strong> / {fmt(maxStats.maxMana)}
+                  </span>
+                </div>
+                <div
+                  className="rpg-statline"
+                  style={{ marginTop: '0.35rem' }}
+                  title="Innate gifts that award STR/AGI/INT count for gear requirements and are included here."
+                >
+                  <span>
+                    STR <strong>{effStats?.strength ?? player.stats.strength}</strong>
+                  </span>
+                  <span>
+                    AGI <strong>{effStats?.agility ?? player.stats.agility}</strong>
+                  </span>
+                  <span>
+                    INT <strong>{effStats?.intelligence ?? player.stats.intelligence}</strong>
+                  </span>
+                </div>
+                {player.innates.length > 0 && (
+                  <div className="rpg-innates-row" title="Rolled once at birth; second gift has 0.001% odds.">
+                    Innate{player.innates.length > 1 ? 's' : ''}:{' '}
+                    {player.innates.map((id) => (
+                      <span key={id} className="rpg-innate-pill" title={INNATE_BY_ID[id]?.description ?? id}>
+                        {formatInnateShort(id)}
+                      </span>
+                    ))}
+                  </div>
                 )}
-                <span className="rpg-hud-badge">
-                  Lv <strong>{player.level}</strong>
-                </span>
-                <span className="rpg-hud-gold" title="Gold">
-                  <IconCoin /> <strong>{player.gold}</strong>
-                </span>
-              </div>
-            </div>
-            <div className="rpg-dashboard-xp" title="Experience">
-              <IconXpSpark />
-              <div className="rpg-xp-bar">
-                <div className="rpg-xp-fill" style={{ width: `${xpPct}%` }} />
-              </div>
-              <span className="rpg-xp-text">
-                {player.xp}/{player.xpToNext} XP
-              </span>
-            </div>
-            <div className="rpg-dashboard-stats">
-              <div className="rpg-statline">
-                <span>
-                  HP <strong>{fmt(player.hp)}</strong> / {fmt(maxStats.maxHp)}
-                </span>
-                <span>
-                  STA <strong>{fmt(player.stamina)}</strong> / {fmt(maxStats.maxStamina)}
-                </span>
-                <span>
-                  MP <strong>{fmt(player.mana)}</strong> / {fmt(maxStats.maxMana)}
-                </span>
-              </div>
-              <div
-                className="rpg-statline"
-                style={{ marginTop: '0.35rem' }}
-                title="Innate gifts that award STR/AGI/INT count for gear requirements and are included here."
-              >
-                <span>
-                  STR <strong>{effStats?.strength ?? player.stats.strength}</strong>
-                </span>
-                <span>
-                  AGI <strong>{effStats?.agility ?? player.stats.agility}</strong>
-                </span>
-                <span>
-                  INT <strong>{effStats?.intelligence ?? player.stats.intelligence}</strong>
-                </span>
-              </div>
-              {player.innates.length > 0 && (
-                <div className="rpg-innates-row" title="Rolled once at birth; second gift has 0.001% odds.">
-                  Innate{player.innates.length > 1 ? 's' : ''}:{' '}
-                  {player.innates.map((id) => (
-                    <span key={id} className="rpg-innate-pill" title={INNATE_BY_ID[id]?.description ?? id}>
-                      {formatInnateShort(id)}
-                    </span>
-                  ))}
+                <div className="rpg-skill-tier-row">
+                  <div className="rpg-skill-tier" title="Attack menu lists one skill per equipped piece; stats unlock heavier gear.">
+                    Combat skills · from equipped gear (see Equipment)
+                  </div>
                 </div>
-              )}
-              <div className="rpg-skill-tier-row">
-                <div className="rpg-skill-tier" title="Attack menu lists one skill per equipped piece; stats unlock heavier gear.">
-                  Combat skills · from equipped gear (see Equipment)
+                <div className="rpg-upgrades" title="Permanent upgrades">
+                  <span>VIT {player.upgrades.vitality}</span>
+                  <span>STR↑ {player.upgrades.striking}</span>
+                  <span>ARC {player.upgrades.arcana}</span>
+                  <span>END {player.upgrades.endurance}</span>
+                </div>
+                {(player.inventory.healthPotion > 0 ||
+                  player.inventory.manaDraught > 0 ||
+                  player.inventory.staminaBrew > 0 ||
+                  Object.keys(player.salvageLoot).length > 0) && (
+                    <div className="rpg-pack">
+                      Pack: Red ×{player.inventory.healthPotion} · Blue ×{player.inventory.manaDraught} · Green ×
+                      {player.inventory.staminaBrew}
+                      {Object.keys(player.salvageLoot).length > 0 && (
+                        <>
+                          {' '}
+                          · Salvage stacks:{' '}
+                          <strong>
+                            {Object.values(player.salvageLoot).reduce((a, n) => a + n, 0)}
+                          </strong>
+                        </>
+                      )}
+                    </div>
+                  )}
+              </div>
+            </section>
+          ) : (
+            <header className="rpg-hud rpg-hud-minimal">
+              <div className="rpg-hud-title">
+                <h1>Frappe Text Adventure RPG</h1>
+              </div>
+            </header>
+          )}
+
+          {!player && phase === 'name' && (
+            <div className="rpg-panel rpg-player">
+              <div>Enter your name to begin.</div>
+            </div>
+          )}
+
+          <div className={`rpg-play-layout rpg-play-mood--${playMood}`}>
+            <aside className="rpg-log-column rpg-log-column--immersive" aria-label="Adventure journal">
+              <div className="rpg-panel rpg-log-panel">
+                <div className="rpg-log-heading">Journal</div>
+                <div className="rpg-log" ref={logRef}>
+                  {logLines.join('\n')}
                 </div>
               </div>
-              <div className="rpg-upgrades" title="Permanent upgrades">
-                <span>VIT {player.upgrades.vitality}</span>
-                <span>STR↑ {player.upgrades.striking}</span>
-                <span>ARC {player.upgrades.arcana}</span>
-                <span>END {player.upgrades.endurance}</span>
-              </div>
-              {(player.inventory.healthPotion > 0 ||
-                player.inventory.manaDraught > 0 ||
-                player.inventory.staminaBrew > 0 ||
-                Object.keys(player.salvageLoot).length > 0) && (
-                  <div className="rpg-pack">
-                    Pack: Red ×{player.inventory.healthPotion} · Blue ×{player.inventory.manaDraught} · Green ×
-                    {player.inventory.staminaBrew}
-                    {Object.keys(player.salvageLoot).length > 0 && (
+            </aside>
+
+              <div className="rpg-controls-column rpg-controls-column--immersive">
+              <div className="rpg-controls-scroll">
+                {enemy && battle && phase !== 'adventure' && phase !== 'name' && phase !== 'shop' && (
+                  <div className="rpg-panel rpg-enemy">
+                    <div className="rpg-statline">
+                      <span>
+                        <strong>{enemy.name}</strong>
+                      </span>
+                      <span className="rpg-loot-tag">
+                        +{enemy.goldReward} <IconCoin size={16} /> · +{enemy.xpReward} XP
+                      </span>
+                    </div>
+                    <div className="rpg-enemy-hp" style={{ marginTop: '0.4rem' }}>
+                      <div className="rpg-enemy-hp-head">
+                        <span className="rpg-enemy-hp-title">HP</span>
+                        <span className="rpg-enemy-hp-values">
+                          <strong>{fmt(battle.enemyHp)}</strong>
+                          <span className="rpg-enemy-hp-sep">/</span>
+                          {fmt(enemy.maxHp)}
+                        </span>
+                      </div>
+                      <div
+                        className="rpg-hpbar"
+                        role="progressbar"
+                        aria-valuemin={0}
+                        aria-valuemax={enemy.maxHp}
+                        aria-valuenow={battle.enemyHp}
+                        aria-label={`${enemy.name} hit points`}
+                      >
+                        <div
+                          className={`rpg-hpbar__fill rpg-hpbar__fill--${enemy.maxHp <= 0
+                            ? 'mid'
+                            : battle.enemyHp / enemy.maxHp > 0.66
+                              ? 'high'
+                              : battle.enemyHp / enemy.maxHp > 0.33
+                                ? 'mid'
+                                : 'low'
+                            }`}
+                          style={{
+                            width: `${enemy.maxHp > 0 ? Math.max(0, Math.min(100, (battle.enemyHp / enemy.maxHp) * 100)) : 0}%`,
+                          }}
+                        />
+                      </div>
+                    </div>
+                    <div className="rpg-statline" style={{ marginTop: '0.35rem' }}>
+                      <span />
+                      <span>
+                        Skill: <strong>{enemy.skill}</strong>
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {phase === 'shop' && player && (
+                  <div className="rpg-shop rpg-shop--immersive">
+                    <h2 className="rpg-shop-heading">Traveling merchant</h2>
+                    <p className="rpg-shop-lead">
+                      Spend gold on tonics, upgrades, and gear. Battle junk stacks here; armor drops sell at ~40% of list price.
+                    </p>
+                    <div className="rpg-shop-filters" role="search">
+                      <label className="rpg-shop-filter-field">
+                        <span className="rpg-shop-filter-label">Search</span>
+                        <input
+                          type="search"
+                          className="rpg-shop-search"
+                          placeholder="Name, skill, slot…"
+                          value={shopSearchQuery}
+                          onChange={(e) => setShopSearchQuery(e.target.value)}
+                          autoComplete="off"
+                        />
+                      </label>
+                      <label className="rpg-shop-filter-field">
+                        <span className="rpg-shop-filter-label">Show</span>
+                        <select
+                          className="rpg-shop-select"
+                          value={shopStockFilter}
+                          onChange={(e) => setShopStockFilter(e.target.value as ShopStockFilter)}
+                        >
+                          <option value="all">All stock</option>
+                          <option value="consumables">Tonics only</option>
+                          <option value="upgrades">Stat upgrades</option>
+                          <optgroup label="Gear by slot">
+                            {COMBAT_GEAR_SLOT_ORDER.map((slot) => (
+                              <option key={slot} value={slot}>
+                                {EQUIPMENT_SLOT_LABELS[slot]}
+                              </option>
+                            ))}
+                          </optgroup>
+                        </select>
+                      </label>
+                    </div>
+                    {Object.keys(player.salvageLoot).some((id) => (player.salvageLoot[id] ?? 0) > 0) && (
                       <>
-                        {' '}
-                        · Salvage stacks:{' '}
-                        <strong>
-                          {Object.values(player.salvageLoot).reduce((a, n) => a + n, 0)}
-                        </strong>
+                        <h3 className="rpg-shop-subheading">Sell junk &amp; salvage</h3>
+                        <p className="rpg-shop-lead rpg-shop-lead--tight">
+                          Mob bits and clutter — one sale per click.
+                        </p>
+                        <ul className="rpg-shop-sell-list">
+                          {Object.entries(player.salvageLoot)
+                            .filter(([, count]) => count > 0)
+                            .map(([sid]) => {
+                              const s = SALVAGE_BY_ID[sid]
+                              if (!s) return null
+                              const n = player.salvageLoot[sid] ?? 0
+                              return (
+                                <li key={`salvage-${sid}`} className="rpg-shop-sell-row">
+                                  <span className="rpg-shop-sell-name">
+                                    {s.name} ×{n}
+                                  </span>
+                                  <span className="rpg-shop-sell-meta">
+                                    +{s.sellPrice} <IconCoin size={14} /> each
+                                  </span>
+                                  <button type="button" className="rpg-tiny" onClick={() => sellSalvageStack(sid)}>
+                                    Sell 1
+                                  </button>
+                                </li>
+                              )
+                            })}
+                        </ul>
+                      </>
+                    )}
+                    {player.gearOwned.length > 0 && (
+                      <>
+                        <h3 className="rpg-shop-subheading">Sell from pack</h3>
+                        <p className="rpg-shop-lead rpg-shop-lead--tight">Only items in your pack (not worn). Each row sells one copy.</p>
+                        <ul className="rpg-shop-sell-list">
+                          {player.gearOwned.map((gid, idx) => {
+                            const g = GEAR_BY_ID[gid]
+                            if (!g) return null
+                            const buy = merchantBuyPrice(g)
+                            return (
+                              <li key={`sell-${gid}-${idx}`} className="rpg-shop-sell-row">
+                                <span className="rpg-shop-sell-name">{g.name}</span>
+                                <span className="rpg-shop-sell-meta">
+                                  {EQUIPMENT_SLOT_LABELS[g.slot]} · +{buy} <IconCoin size={14} />
+                                </span>
+                                <button type="button" className="rpg-tiny" onClick={() => sellGearFromPack(gid)}>
+                                  Sell
+                                </button>
+                              </li>
+                            )
+                          })}
+                        </ul>
+                      </>
+                    )}
+                    {showShopConsumables && filteredShopConsumables.length > 0 && (
+                      <>
+                        {shopStockFilter === 'all' && (
+                          <h3 className="rpg-shop-subheading">Tonics &amp; draughts</h3>
+                        )}
+                        <div className="rpg-shop-grid">
+                          {filteredShopConsumables.map((c) => (
+                            <div key={c.id} className="rpg-shop-card rpg-motion-card">
+                              <ShopIcon kind={c.icon} />
+                              <div className="rpg-shop-card-body">
+                                <strong>{c.name}</strong>
+                                <p>{c.description}</p>
+                                <button type="button" onClick={() => buyConsumable(c.id)}>
+                                  Buy — {c.price} gold
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                    {showShopUpgrades && filteredShopUpgrades.length > 0 && (
+                      <>
+                        {shopStockFilter === 'all' && (
+                          <h3 className="rpg-shop-subheading">Permanent upgrades</h3>
+                        )}
+                        <div className="rpg-shop-grid">
+                          {filteredShopUpgrades.map((u) => {
+                            const rank = player.upgrades[u.id]
+                            const price = upgradePrice(u.basePrice, rank)
+                            return (
+                              <div key={u.id} className="rpg-shop-card rpg-shop-card-wide rpg-motion-card">
+                                <ShopIcon kind={u.icon} />
+                                <div className="rpg-shop-card-body">
+                                  <strong>
+                                    {u.name} <span className="rpg-rank">rank {rank}</span>
+                                  </strong>
+                                  <p>{u.description}</p>
+                                  <button type="button" onClick={() => buyUpgrade(u.id)}>
+                                    Upgrade — {price} gold
+                                  </button>
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </>
+                    )}
+                    {!shopHasBuyStock && (
+                      <p className="rpg-shop-empty">
+                        Nothing matches this filter or search — try “All stock” or clear the search box.
+                      </p>
+                    )}
+                    {showShopGear && filteredShopGear.length > 0 && (
+                      <>
+                        <h3 className="rpg-shop-subheading">Arms &amp; armor</h3>
+                        <p className="rpg-shop-lead rpg-shop-lead--tight">
+                          Each piece grants one combat skill when worn. Mix slots to shape your kit — main hand and off-hand respect two-handed weapons.
+                        </p>
+                        <div className="rpg-shop-grid rpg-shop-grid--gear">
+                          {filteredShopGear.map((g) => (
+                            <div key={g.id} className="rpg-shop-card rpg-shop-card--gear rpg-motion-card">
+                              <div className="rpg-shop-card-body">
+                                <strong>{g.name}</strong>
+                                <span className="rpg-gear-slot-pill">
+                                  {EQUIPMENT_SLOT_LABELS[g.slot]}
+                                  {g.twoHanded ? ' · Two-handed' : ''}
+                                </span>
+                                <p>{g.description}</p>
+                                <p className="rpg-gear-req-line">Requires: {formatRequirements(g)}</p>
+                                <p className="rpg-gear-skill-line">
+                                  Skill: <strong>{g.skill.name}</strong> ({fmt(g.skill.damage)} ·{' '}
+                                  {formatSkillResourceDef(g.skill)})
+                                </p>
+                                <button type="button" onClick={() => buyGear(g.id)}>
+                                  Buy — {g.price} gold
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
                       </>
                     )}
                   </div>
                 )}
-            </div>
-          </section>
-        ) : (
-          <header className="rpg-hud rpg-hud-minimal">
-            <div className="rpg-hud-title">
-              <h1>Frappe Text Adventure RPG</h1>
-            </div>
-          </header>
-        )}
 
-        {!player && phase === 'name' && (
-          <div className="rpg-panel rpg-player">
-            <div>Enter your name to begin.</div>
-          </div>
-        )}
-
-        <div className="rpg-play-layout">
-          <aside className="rpg-log-column" aria-label="Adventure journal">
-            <div className="rpg-panel rpg-log-panel">
-              <div className="rpg-log-heading">Journal</div>
-              <div className="rpg-log" ref={logRef}>
-                {logLines.join('\n')}
-              </div>
-            </div>
-          </aside>
-
-          <div className="rpg-controls-column">
-            <div className="rpg-controls-scroll">
-            {enemy && battle && phase !== 'adventure' && phase !== 'name' && phase !== 'shop' && (
-              <div className="rpg-panel rpg-enemy">
-                <div className="rpg-statline">
-                  <span>
-                    <strong>{enemy.name}</strong>
-                  </span>
-                  <span className="rpg-loot-tag">
-                    +{enemy.goldReward} <IconCoin size={16} /> · +{enemy.xpReward} XP
-                  </span>
-                </div>
-                <div className="rpg-enemy-hp" style={{ marginTop: '0.4rem' }}>
-                  <div className="rpg-enemy-hp-head">
-                    <span className="rpg-enemy-hp-title">HP</span>
-                    <span className="rpg-enemy-hp-values">
-                      <strong>{fmt(battle.enemyHp)}</strong>
-                      <span className="rpg-enemy-hp-sep">/</span>
-                      {fmt(enemy.maxHp)}
-                    </span>
-                  </div>
-                  <div
-                    className="rpg-hpbar"
-                    role="progressbar"
-                    aria-valuemin={0}
-                    aria-valuemax={enemy.maxHp}
-                    aria-valuenow={battle.enemyHp}
-                    aria-label={`${enemy.name} hit points`}
-                  >
-                    <div
-                      className={`rpg-hpbar__fill rpg-hpbar__fill--${enemy.maxHp <= 0
-                          ? 'mid'
-                          : battle.enemyHp / enemy.maxHp > 0.66
-                            ? 'high'
-                            : battle.enemyHp / enemy.maxHp > 0.33
-                              ? 'mid'
-                              : 'low'
-                        }`}
-                      style={{
-                        width: `${enemy.maxHp > 0 ? Math.max(0, Math.min(100, (battle.enemyHp / enemy.maxHp) * 100)) : 0}%`,
-                      }}
-                    />
-                  </div>
-                </div>
-                <div className="rpg-statline" style={{ marginTop: '0.35rem' }}>
-                  <span />
-                  <span>
-                    Skill: <strong>{enemy.skill}</strong>
-                  </span>
-                </div>
-              </div>
-            )}
-
-            {phase === 'shop' && player && (
-              <div className="rpg-shop">
-                <h2 className="rpg-shop-heading">Traveling merchant</h2>
-                <p className="rpg-shop-lead">
-                  Spend gold on tonics, upgrades, and gear. Battle junk stacks here; armor drops sell at ~40% of list price.
-                </p>
-                {Object.keys(player.salvageLoot).some((id) => (player.salvageLoot[id] ?? 0) > 0) && (
-                  <>
-                    <h3 className="rpg-shop-subheading">Sell junk &amp; salvage</h3>
-                    <p className="rpg-shop-lead rpg-shop-lead--tight">
-                      Mob bits and clutter — one sale per click.
+                {phase === 'gear' && player && (
+                  <div className="rpg-gear rpg-gear--immersive">
+                    <h2 className="rpg-shop-heading">Equipment</h2>
+                    <p className="rpg-shop-lead">
+                      Dress each slot — earrings to sabatons. Each worn piece adds its skill to your Attack menu (stat gates apply).
                     </p>
-                    <ul className="rpg-shop-sell-list">
-                      {Object.entries(player.salvageLoot)
-                        .filter(([, count]) => count > 0)
-                        .map(([sid]) => {
-                          const s = SALVAGE_BY_ID[sid]
-                          if (!s) return null
-                          const n = player.salvageLoot[sid] ?? 0
+                    {player.equipment.mainHand && GEAR_BY_ID[player.equipment.mainHand]?.twoHanded && (
+                      <p className="rpg-gear-note">Two-handed weapon readied — off-hand is locked until you remove it.</p>
+                    )}
+                    <div className="rpg-gear-slots">
+                      <div className="rpg-gear-slots-head">
+                        <span>Slot</span>
+                        <span>Worn</span>
+                        <span />
+                      </div>
+                      {COMBAT_GEAR_SLOT_ORDER.map((slot) => {
+                        const id = player.equipment[slot]
+                        const piece = id ? GEAR_BY_ID[id] : null
+                        return (
+                          <div key={slot} className="rpg-gear-slot-row">
+                            <span className="rpg-gear-slot-label">{EQUIPMENT_SLOT_LABELS[slot]}</span>
+                            <span className="rpg-gear-slot-item">
+                              {piece ? (
+                                <>
+                                  {piece.name}
+                                  <span className="rpg-gear-slot-skill"> · {piece.skill.name}</span>
+                                </>
+                              ) : (
+                                <span className="rpg-gear-slot-empty">Empty</span>
+                              )}
+                            </span>
+                            {piece ? (
+                              <button type="button" className="rpg-tiny" onClick={() => unequipSlot(slot)}>
+                                Stow
+                              </button>
+                            ) : (
+                              <span />
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                    <h3 className="rpg-shop-subheading">In your pack</h3>
+                    {player.gearOwned.length === 0 ? (
+                      <p className="rpg-gear-pack-empty">
+                        Nothing here yet — buy gear or wait for drops; junk stacks as salvage (merchant). Sell spares in the shop.
+                      </p>
+                    ) : (
+                      <ul className="rpg-gear-pack-list">
+                        {player.gearOwned.map((gid, idx) => {
+                          const g = GEAR_BY_ID[gid]
+                          if (!g) return null
+                          const offBlocked =
+                            g.slot === 'offHand' &&
+                            player.equipment.mainHand &&
+                            GEAR_BY_ID[player.equipment.mainHand]?.twoHanded
+                          const statBlocked = !playerMeetsStatRequirements(player, g)
                           return (
-                            <li key={`salvage-${sid}`} className="rpg-shop-sell-row">
-                              <span className="rpg-shop-sell-name">
-                                {s.name} ×{n}
-                              </span>
-                              <span className="rpg-shop-sell-meta">
-                                +{s.sellPrice} <IconCoin size={14} /> each
-                              </span>
-                              <button type="button" className="rpg-tiny" onClick={() => sellSalvageStack(sid)}>
-                                Sell 1
+                            <li key={`${gid}-${idx}`} className="rpg-gear-pack-row">
+                              <div className="rpg-gear-pack-main">
+                                <strong>{g.name}</strong>
+                                <span className="rpg-gear-slot-pill">
+                                  {EQUIPMENT_SLOT_LABELS[g.slot]}
+                                  {g.twoHanded ? ' · 2H' : ''}
+                                </span>
+                              </div>
+                              <span className="rpg-gear-pack-skill">{g.skill.name}</span>
+                              <button
+                                type="button"
+                                className="rpg-tiny"
+                                disabled={!!offBlocked || statBlocked}
+                                title={
+                                  offBlocked
+                                    ? 'Two-handed weapon uses both hands'
+                                    : statBlocked
+                                      ? `Requires ${formatRequirements(g)}`
+                                      : 'Wear this piece'
+                                }
+                                onClick={() => equipFromBag(gid)}
+                              >
+                                Equip
                               </button>
                             </li>
                           )
                         })}
-                    </ul>
-                  </>
-                )}
-                {player.gearOwned.length > 0 && (
-                  <>
-                    <h3 className="rpg-shop-subheading">Sell from pack</h3>
-                    <p className="rpg-shop-lead rpg-shop-lead--tight">Only items in your pack (not worn). Each row sells one copy.</p>
-                    <ul className="rpg-shop-sell-list">
-                      {player.gearOwned.map((gid, idx) => {
-                        const g = GEAR_BY_ID[gid]
-                        if (!g) return null
-                        const buy = merchantBuyPrice(g)
-                        return (
-                          <li key={`sell-${gid}-${idx}`} className="rpg-shop-sell-row">
-                            <span className="rpg-shop-sell-name">{g.name}</span>
-                            <span className="rpg-shop-sell-meta">
-                              {EQUIPMENT_SLOT_LABELS[g.slot]} · +{buy} <IconCoin size={14} />
-                            </span>
-                            <button type="button" className="rpg-tiny" onClick={() => sellGearFromPack(gid)}>
-                              Sell
-                            </button>
-                          </li>
-                        )
-                      })}
-                    </ul>
-                  </>
-                )}
-                <div className="rpg-shop-grid">
-                  {SHOP_CONSUMABLES.map((c) => (
-                    <div key={c.id} className="rpg-shop-card">
-                      <ShopIcon kind={c.icon} />
-                      <div className="rpg-shop-card-body">
-                        <strong>{c.name}</strong>
-                        <p>{c.description}</p>
-                        <button type="button" onClick={() => buyConsumable(c.id)}>
-                          Buy — {c.price} gold
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                  {SHOP_UPGRADES.map((u) => {
-                    const rank = player.upgrades[u.id]
-                    const price = upgradePrice(u.basePrice, rank)
-                    return (
-                      <div key={u.id} className="rpg-shop-card rpg-shop-card-wide">
-                        <ShopIcon kind={u.icon} />
-                        <div className="rpg-shop-card-body">
-                          <strong>
-                            {u.name} <span className="rpg-rank">rank {rank}</span>
-                          </strong>
-                          <p>{u.description}</p>
-                          <button type="button" onClick={() => buyUpgrade(u.id)}>
-                            Upgrade — {price} gold
-                          </button>
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-                <h3 className="rpg-shop-subheading">Arms &amp; armor</h3>
-                <p className="rpg-shop-lead rpg-shop-lead--tight">
-                  Each piece grants one combat skill when worn. Mix slots to shape your kit — main hand and off-hand respect two-handed weapons.
-                </p>
-                <div className="rpg-shop-grid rpg-shop-grid--gear">
-                  {GEAR_CATALOG.map((g) => (
-                    <div key={g.id} className="rpg-shop-card rpg-shop-card--gear">
-                      <div className="rpg-shop-card-body">
-                        <strong>{g.name}</strong>
-                        <span className="rpg-gear-slot-pill">
-                          {EQUIPMENT_SLOT_LABELS[g.slot]}
-                          {g.twoHanded ? ' · Two-handed' : ''}
-                        </span>
-                        <p>{g.description}</p>
-                        <p className="rpg-gear-req-line">Requires: {formatRequirements(g)}</p>
-                        <p className="rpg-gear-skill-line">
-                          Skill: <strong>{g.skill.name}</strong> ({fmt(g.skill.damage)} ·{' '}
-                          {formatSkillResourceDef(g.skill)})
-                        </p>
-                        <button type="button" onClick={() => buyGear(g.id)}>
-                          Buy — {g.price} gold
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {phase === 'gear' && player && (
-              <div className="rpg-gear">
-                <h2 className="rpg-shop-heading">Equipment</h2>
-                <p className="rpg-shop-lead">
-                  Dress each slot — earrings to sabatons. Each worn piece adds its skill to your Attack menu (stat gates apply).
-                </p>
-                {player.equipment.mainHand && GEAR_BY_ID[player.equipment.mainHand]?.twoHanded && (
-                  <p className="rpg-gear-note">Two-handed weapon readied — off-hand is locked until you remove it.</p>
-                )}
-                <div className="rpg-gear-slots">
-                  <div className="rpg-gear-slots-head">
-                    <span>Slot</span>
-                    <span>Worn</span>
-                    <span />
+                      </ul>
+                    )}
                   </div>
-                  {COMBAT_GEAR_SLOT_ORDER.map((slot) => {
-                    const id = player.equipment[slot]
-                    const piece = id ? GEAR_BY_ID[id] : null
-                    return (
-                      <div key={slot} className="rpg-gear-slot-row">
-                        <span className="rpg-gear-slot-label">{EQUIPMENT_SLOT_LABELS[slot]}</span>
-                        <span className="rpg-gear-slot-item">
-                          {piece ? (
-                            <>
-                              {piece.name}
-                              <span className="rpg-gear-slot-skill"> · {piece.skill.name}</span>
-                            </>
-                          ) : (
-                            <span className="rpg-gear-slot-empty">Empty</span>
-                          )}
-                        </span>
-                        {piece ? (
-                          <button type="button" className="rpg-tiny" onClick={() => unequipSlot(slot)}>
-                            Stow
-                          </button>
-                        ) : (
-                          <span />
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-                <h3 className="rpg-shop-subheading">In your pack</h3>
-                {player.gearOwned.length === 0 ? (
-                  <p className="rpg-gear-pack-empty">
-                    Nothing here yet — buy gear or wait for drops; junk stacks as salvage (merchant). Sell spares in the shop.
-                  </p>
-                ) : (
-                  <ul className="rpg-gear-pack-list">
-                    {player.gearOwned.map((gid, idx) => {
-                      const g = GEAR_BY_ID[gid]
-                      if (!g) return null
-                      const offBlocked =
-                        g.slot === 'offHand' &&
-                        player.equipment.mainHand &&
-                        GEAR_BY_ID[player.equipment.mainHand]?.twoHanded
-                      const statBlocked = !playerMeetsStatRequirements(player, g)
-                      return (
-                        <li key={`${gid}-${idx}`} className="rpg-gear-pack-row">
-                          <div className="rpg-gear-pack-main">
-                            <strong>{g.name}</strong>
-                            <span className="rpg-gear-slot-pill">
-                              {EQUIPMENT_SLOT_LABELS[g.slot]}
-                              {g.twoHanded ? ' · 2H' : ''}
-                            </span>
-                          </div>
-                          <span className="rpg-gear-pack-skill">{g.skill.name}</span>
-                          <button
-                            type="button"
-                            className="rpg-tiny"
-                            disabled={!!offBlocked || statBlocked}
-                            title={
-                              offBlocked
-                                ? 'Two-handed weapon uses both hands'
-                                : statBlocked
-                                  ? `Requires ${formatRequirements(g)}`
-                                  : 'Wear this piece'
-                            }
-                            onClick={() => equipFromBag(gid)}
-                          >
-                            Equip
-                          </button>
-                        </li>
-                      )
-                    })}
-                  </ul>
                 )}
-              </div>
-            )}
 
-            <div className="rpg-controls-body">{actions}</div>
+                <div className="rpg-controls-body">{actions}</div>
+              </div>
             </div>
           </div>
-        </div>
 
-        <p className="rpg-meta">Browser RPG — progression auto-saves while you play.</p>
+          <p className="rpg-meta">Browser RPG — progression auto-saves while you play.</p>
+        </div>
       </div>
-    </div>
+    </>
   )
 }

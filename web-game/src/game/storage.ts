@@ -9,7 +9,7 @@ import type {
   PlayerUpgrades,
 } from './types'
 
-export const STORAGE_KEY = 'woods-rpg-save-v1'
+export const STORAGE_KEY = 'Wela-rpg-save-v1'
 
 export interface SavePayload {
   version: 1

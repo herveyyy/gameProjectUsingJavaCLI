@@ -55,9 +55,9 @@ export const PLACES: readonly PlaceDef[] = [
     mobPool: [2, 1],
   },
   {
-    id: 'whisper_woods',
-    name: 'Whisper Woods',
-    shortName: 'the woods',
+    id: 'whisper_Wela',
+    name: 'Whisper Wela',
+    shortName: 'the Wela',
     description: 'Dense trees and the encounters you know from camp tales.',
     levelRecommended: '1–4',
     levelMin: 1,
