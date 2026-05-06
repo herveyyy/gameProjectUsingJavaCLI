@@ -2,7 +2,7 @@
   "name": "Wela-rpg-web",
   "private": true,
   "version": "0.0.0",
-  "description": "Frappe Text Adventure RPG — browser game (Vite + React)",
+  "description": "The Denden's Adventure — browser game (Vite + React)",
   "type": "module",
   "scripts": {
     "dev": "vite",

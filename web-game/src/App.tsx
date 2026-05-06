@@ -1628,55 +1628,55 @@ export default function App() {
               player.inventory.manaDraught > 0 ||
               player.inventory.staminaBrew > 0 ||
               player.inventory.sunriseCordial > 0) && (
-            <div className="rpg-adventure-inventory">
-              <div className="rpg-inventory-actions">
-                <span className="rpg-inventory-label">Tonics</span>
-                {player.inventory.healthPotion > 0 && (
-                  <button
-                    type="button"
-                    className="rpg-tiny"
-                    title={`~${fmt(getHealthPotionHeal(player))} HP (Vitality & max HP)`}
-                    onClick={() => usePotionAdventure('hp')}
-                  >
-                    Red ×{player.inventory.healthPotion} (+{fmt(getHealthPotionHeal(player))})
-                  </button>
-                )}
-                {player.inventory.manaDraught > 0 && (
-                  <button
-                    type="button"
-                    className="rpg-tiny"
-                    title={`~${fmt(getManaDraughtRestore(player))} MP (Arcana & max mana)`}
-                    onClick={() => usePotionAdventure('mana')}
-                  >
-                    Blue ×{player.inventory.manaDraught} (+{fmt(getManaDraughtRestore(player))})
-                  </button>
-                )}
-                {player.inventory.staminaBrew > 0 && (
-                  <button
-                    type="button"
-                    className="rpg-tiny"
-                    title={`~${fmt(getStaminaBrewRestore(player))} STA (Endurance & max stamina)`}
-                    onClick={() => usePotionAdventure('sta')}
-                  >
-                    Green ×{player.inventory.staminaBrew} (+{fmt(getStaminaBrewRestore(player))})
-                  </button>
-                )}
-                {player.inventory.sunriseCordial > 0 && (
-                  <button
-                    type="button"
-                    className="rpg-tiny"
-                    title={(() => {
-                      const r = getSunriseCordialRestore(player)
-                      return `~${fmt(r.hp)} HP / ${fmt(r.mana)} MP / ${fmt(r.stamina)} STA`
-                    })()}
-                    onClick={() => useSunriseCordialAdventure()}
-                  >
-                    Sunrise ×{player.inventory.sunriseCordial}
-                  </button>
-                )}
+              <div className="rpg-adventure-inventory">
+                <div className="rpg-inventory-actions">
+                  <span className="rpg-inventory-label">Tonics</span>
+                  {player.inventory.healthPotion > 0 && (
+                    <button
+                      type="button"
+                      className="rpg-tiny"
+                      title={`~${fmt(getHealthPotionHeal(player))} HP (Vitality & max HP)`}
+                      onClick={() => usePotionAdventure('hp')}
+                    >
+                      Red ×{player.inventory.healthPotion} (+{fmt(getHealthPotionHeal(player))})
+                    </button>
+                  )}
+                  {player.inventory.manaDraught > 0 && (
+                    <button
+                      type="button"
+                      className="rpg-tiny"
+                      title={`~${fmt(getManaDraughtRestore(player))} MP (Arcana & max mana)`}
+                      onClick={() => usePotionAdventure('mana')}
+                    >
+                      Blue ×{player.inventory.manaDraught} (+{fmt(getManaDraughtRestore(player))})
+                    </button>
+                  )}
+                  {player.inventory.staminaBrew > 0 && (
+                    <button
+                      type="button"
+                      className="rpg-tiny"
+                      title={`~${fmt(getStaminaBrewRestore(player))} STA (Endurance & max stamina)`}
+                      onClick={() => usePotionAdventure('sta')}
+                    >
+                      Green ×{player.inventory.staminaBrew} (+{fmt(getStaminaBrewRestore(player))})
+                    </button>
+                  )}
+                  {player.inventory.sunriseCordial > 0 && (
+                    <button
+                      type="button"
+                      className="rpg-tiny"
+                      title={(() => {
+                        const r = getSunriseCordialRestore(player)
+                        return `~${fmt(r.hp)} HP / ${fmt(r.mana)} MP / ${fmt(r.stamina)} STA`
+                      })()}
+                      onClick={() => useSunriseCordialAdventure()}
+                    >
+                      Sunrise ×{player.inventory.sunriseCordial}
+                    </button>
+                  )}
+                </div>
               </div>
-            </div>
-          )}
+            )}
         </>
       )
     }
@@ -2591,7 +2591,7 @@ export default function App() {
       >
         <div className="rpg-splash__frame">
           <p className="rpg-splash__eyebrow">Wela RPG</p>
-          <h2 className="rpg-splash__title">Frappe Text Adventure RPG</h2>
+          <h2 className="rpg-splash__title">The Denden's Adventure</h2>
           <p className="rpg-splash__tagline">Sharpening verbs… waxing the journal…</p>
           <div className="rpg-splash__track" aria-hidden>
             <div className="rpg-splash__track-fill" />
@@ -2641,7 +2641,7 @@ export default function App() {
                 <div className="rpg-ios-settings__inset">
                   <div className="rpg-ios-settings__row">
                     <span className="rpg-ios-settings__row-label">Game</span>
-                    <span className="rpg-ios-settings__row-value">Frappe Text Adventure RPG</span>
+                    <span className="rpg-ios-settings__row-value">The Denden's Adventure</span>
                   </div>
                   <div className="rpg-ios-settings__row">
                     <span className="rpg-ios-settings__row-label">Traveler&apos;s Grimoire</span>
@@ -2673,9 +2673,9 @@ export default function App() {
           </div>
         )}
         <div
-          className={`app-root app-root--fullscreen${splashPhase === 'gone' ? ' rpg-app-reveal' : ''}`}
+          className={`app-root app-root--fullscreen h-screen w-screen${splashPhase === 'gone' ? ' rpg-app-reveal' : ''}`}
         >
-          <div className="rpg-shell rpg-shell--fullscreen rpg-menu-shell">
+          <div className="rpg-shell rpg-shell--fullscreen rpg-menu-shell h-screen w-screen">
             <button
               type="button"
               className="rpg-fs-btn"
@@ -2686,83 +2686,130 @@ export default function App() {
             >
               <IconFullscreen expanded={browserFullscreen} size={20} />
             </button>
-            <h1 className="rpg-menu-title">Frappe Text Adventure RPG</h1>
-            <p className="rpg-menu-lead">
-              Pick a save slot — each adventurer keeps their own progress in this browser.
-            </p>
-            {hasSave && <p className="rpg-menu-save">You have one or more heroes saved on this device.</p>}
-            <button
-              type="button"
-              className="rpg-menu-settings-entry"
-              onClick={() => openSettings('menu')}
-              disabled={gameBooting}
-            >
-              <span className="rpg-menu-settings-entry__label">Settings</span>
-              <span className="rpg-menu-settings-entry__chev" aria-hidden>
-                ›
-              </span>
-            </button>
-            <div className="rpg-menu-slots" aria-label="Character save slots">
-              {listSlotSummaries().map(({ index, player: slotPlayer }) => (
-                <div
-                  key={index}
-                  className={`rpg-menu-slot${slotPlayer ? ' rpg-menu-slot--filled' : ' rpg-menu-slot--empty'}`}
-                >
-                  <div className="rpg-menu-slot-head">
-                    <span className="rpg-menu-slot-label">Adventurer {index + 1}</span>
+            <div className="rpg-landing">
+              <header className="rpg-landing-hero">
+                <div className="rpg-landing-brand">
+                  <div className="rpg-landing-portrait" aria-hidden>
+                    <AdventurerPortrait size={76} />
                   </div>
-                  {slotPlayer ? (
-                    <>
-                      <p className="rpg-menu-slot-summary">
-                        <strong>{slotPlayer.name}</strong>
-                        <span className="rpg-menu-slot-meta">
-                          {' '}
-                          · Level {slotPlayer.level} · {slotPlayer.gold} gold
-                        </span>
-                      </p>
-                      <div className="rpg-menu-slot-actions">
+                  <div className="rpg-landing-titles">
+                    <p className="rpg-landing-eyebrow">Wela RPG</p>
+                    <h1 className="rpg-menu-title">The Denden's Adventure</h1>
+                    <p className="rpg-landing-tagline">
+                      Gear-forged skills, regional expeditions, and birth innates — each save slot is its own hero on
+                      this device.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="rpg-menu-settings-entry rpg-landing-settings"
+                  onClick={() => openSettings('menu')}
+                  disabled={gameBooting}
+                >
+                  <span className="rpg-menu-settings-entry__label">Settings</span>
+                  <span className="rpg-menu-settings-entry__chev" aria-hidden>
+                    ›
+                  </span>
+                </button>
+              </header>
+
+              <ul className="rpg-landing-features" aria-label="Game highlights">
+                <li className="rpg-landing-feature">
+                  <span className="rpg-landing-feature__mark" aria-hidden>
+                    ⚔
+                  </span>
+                  <span className="rpg-landing-feature__text">Combat skills from everything you wear</span>
+                </li>
+                <li className="rpg-landing-feature">
+                  <span className="rpg-landing-feature__mark" aria-hidden>
+                    🗺
+                  </span>
+                  <span className="rpg-landing-feature__text">Regions, merchants, and scaled encounters</span>
+                </li>
+                <li className="rpg-landing-feature">
+                  <span className="rpg-landing-feature__mark" aria-hidden>
+                    ✦
+                  </span>
+                  <span className="rpg-landing-feature__text">Birth innates from modest to reality-bending</span>
+                </li>
+                <li className="rpg-landing-feature">
+                  <span className="rpg-landing-feature__mark" aria-hidden>
+                    💾
+                  </span>
+                  <span className="rpg-landing-feature__text">Three adventurers — pick a slot to begin</span>
+                </li>
+              </ul>
+
+              {hasSave && (
+                <p className="rpg-menu-save">You have one or more heroes saved on this device.</p>
+              )}
+
+              <h2 className="rpg-landing-section-title" id="menu-save-slots-heading">
+                Your adventurers
+              </h2>
+              <div className="rpg-menu-slots" aria-labelledby="menu-save-slots-heading">
+                {listSlotSummaries().map(({ index, player: slotPlayer }) => (
+                  <div
+                    key={index}
+                    className={`rpg-menu-slot${slotPlayer ? ' rpg-menu-slot--filled' : ' rpg-menu-slot--empty'}`}
+                  >
+                    <div className="rpg-menu-slot-head">
+                      <span className="rpg-menu-slot-label">Adventurer {index + 1}</span>
+                    </div>
+                    {slotPlayer ? (
+                      <>
+                        <p className="rpg-menu-slot-summary">
+                          <strong>{slotPlayer.name}</strong>
+                          <span className="rpg-menu-slot-meta">
+                            {' '}
+                            · Level {slotPlayer.level} · {slotPlayer.gold} gold
+                          </span>
+                        </p>
+                        <div className="rpg-menu-slot-actions">
+                          <button
+                            type="button"
+                            className="rpg-menu-play"
+                            onClick={() => handleContinueSlot(index)}
+                            disabled={gameBooting}
+                          >
+                            Continue
+                          </button>
+                          <button
+                            type="button"
+                            className="rpg-menu-secondary"
+                            onClick={() => handleNewCharacterSlot(index)}
+                            disabled={gameBooting}
+                          >
+                            New character
+                          </button>
+                          <button
+                            type="button"
+                            className="rpg-menu-delete"
+                            onClick={() => handleDeleteSlot(index)}
+                            disabled={gameBooting}
+                          >
+                            Delete save
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="rpg-menu-slot-actions rpg-menu-slot-actions--single">
                         <button
                           type="button"
                           className="rpg-menu-play"
-                          onClick={() => handleContinueSlot(index)}
-                          disabled={gameBooting}
-                        >
-                          Continue
-                        </button>
-                        <button
-                          type="button"
-                          className="rpg-menu-secondary"
                           onClick={() => handleNewCharacterSlot(index)}
                           disabled={gameBooting}
                         >
                           New character
                         </button>
-                        <button
-                          type="button"
-                          className="rpg-menu-delete"
-                          onClick={() => handleDeleteSlot(index)}
-                          disabled={gameBooting}
-                        >
-                          Delete save
-                        </button>
                       </div>
-                    </>
-                  ) : (
-                    <div className="rpg-menu-slot-actions rpg-menu-slot-actions--single">
-                      <button
-                        type="button"
-                        className="rpg-menu-play"
-                        onClick={() => handleNewCharacterSlot(index)}
-                        disabled={gameBooting}
-                      >
-                        New character
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ))}
+                    )}
+                  </div>
+                ))}
+              </div>
+              <p className="rpg-meta rpg-landing-foot">Uses localStorage — clearing site data removes saves.</p>
             </div>
-            <p className="rpg-meta">Uses localStorage — clearing site data removes saves.</p>
           </div>
         </div>
       </>
@@ -2824,7 +2871,7 @@ export default function App() {
           {!(player && maxStats) && (
             <header className="rpg-hud rpg-hud-minimal">
               <div className="rpg-hud-title">
-                <h1>Frappe Text Adventure RPG</h1>
+                <h1>The Denden's Adventure</h1>
               </div>
             </header>
           )}
@@ -2953,19 +3000,19 @@ export default function App() {
                         phase === 'pvp_rps') &&
                       (pvpRole === 'host' ? pvpCombat.hostStatuses : pvpCombat.guestStatuses)
                         ?.length ? (
-                        <div
-                          className="rpg-statline rpg-pvp-status-line"
-                          style={{ marginTop: '0.3rem' }}
-                          title="Duel effects on you"
-                        >
-                          <span style={{ flex: 1, fontSize: '0.88rem', opacity: 0.92 }}>
-                            Duel — on you:{' '}
-                            {(pvpRole === 'host' ? pvpCombat.hostStatuses : pvpCombat.guestStatuses)!
-                              .map((s) => formatStatusLine(s))
-                              .join(' · ')}
-                          </span>
-                        </div>
-                      ) : null}
+                      <div
+                        className="rpg-statline rpg-pvp-status-line"
+                        style={{ marginTop: '0.3rem' }}
+                        title="Duel effects on you"
+                      >
+                        <span style={{ flex: 1, fontSize: '0.88rem', opacity: 0.92 }}>
+                          Duel — on you:{' '}
+                          {(pvpRole === 'host' ? pvpCombat.hostStatuses : pvpCombat.guestStatuses)!
+                            .map((s) => formatStatusLine(s))
+                            .join(' · ')}
+                        </span>
+                      </div>
+                    ) : null}
                     {pvpCombat &&
                       pvpRole &&
                       (phase === 'pvp_battle_menu' ||

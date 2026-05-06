@@ -205,6 +205,28 @@
   font-weight: 500;
 }
 
+[data-theme='silk'] .rpg-landing-eyebrow,
+[data-theme='silk'] .rpg-landing-section-title {
+  color: var(--silk-on-surface-variant);
+}
+
+[data-theme='silk'] .rpg-landing-tagline {
+  color: var(--silk-on-surface);
+  font-weight: 500;
+}
+
+[data-theme='silk'] .rpg-landing-portrait,
+[data-theme='silk'] .rpg-landing-feature {
+  border: none;
+  border-radius: var(--silk-radius-lg);
+  background: var(--silk-surface);
+  box-shadow: var(--silk-raised);
+}
+
+[data-theme='silk'] .rpg-landing-feature {
+  font-weight: 600;
+}
+
 [data-theme='silk'] .rpg-menu-save {
   color: var(--silk-tertiary);
   font-weight: 600;

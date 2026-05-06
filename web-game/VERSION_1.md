@@ -1,6 +1,6 @@
 # Wela RPG — Version 1
 
-**Frappe Text Adventure RPG** is a browser-first RPG you play in a single tab: a journal-style adventure with gear-driven combat, shops, regions to explore, and optional duels against another player.
+**The Denden's Adventure** is a browser-first RPG you play in a single tab: a journal-style adventure with gear-driven combat, shops, regions to explore, and optional duels against another player.
 
 Version 1 is the full first slice of that vision — deep enough to sink into, honest about what’s still growing, and built for people who like numbers that matter, loot that stacks, and one more fight before resting at the inn.
 

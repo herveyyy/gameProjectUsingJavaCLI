@@ -309,6 +309,28 @@
   color: var(--g-faded-ink);
 }
 
+[data-theme='grimoire'] .rpg-landing-eyebrow,
+[data-theme='grimoire'] .rpg-landing-tagline,
+[data-theme='grimoire'] .rpg-landing-section-title {
+  color: var(--g-faded-ink);
+}
+
+[data-theme='grimoire'] .rpg-landing-tagline {
+  opacity: 1;
+}
+
+[data-theme='grimoire'] .rpg-landing-portrait,
+[data-theme='grimoire'] .rpg-landing-feature {
+  border: var(--g-border);
+  border-radius: var(--g-radius);
+  background: var(--g-surface);
+  box-shadow: var(--g-shadow-soft);
+}
+
+[data-theme='grimoire'] .rpg-landing-feature {
+  font-family: var(--g-font-ui);
+}
+
 [data-theme='grimoire'] .rpg-menu-slot {
   border: var(--g-border);
   border-radius: var(--g-radius);

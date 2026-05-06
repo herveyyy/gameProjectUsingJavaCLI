@@ -39,3 +39,23 @@ body {
   display: flex;
   flex-direction: column;
 }
+
+/* Viewport utilities (menu / full-bleed shells) */
+.w-screen {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.h-screen {
+  min-height: 100vh;
+  min-height: 100dvh;
+  min-height: -webkit-fill-available;
+}
+
+/* After App.css .rpg-shell--fullscreen; keeps menu/play roots viewport-tall */
+.app-root.app-root--fullscreen.h-screen {
+  min-height: 100vh;
+  min-height: 100dvh;
+  min-height: -webkit-fill-available;
+}
