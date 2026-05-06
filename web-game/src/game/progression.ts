@@ -1,14 +1,33 @@
 import {
   ADVENTURER_BASE,
+  MAX_PLAYER_STAT,
   SHOP_CONSUMABLES,
+  SHOP_STAT_TOMES,
   SHOP_UPGRADES,
+  statTomePrice,
   upgradePrice,
   xpRequiredForNextLevel,
 } from './constants'
-import { GEAR_BY_ID, merchantBuyPrice } from './gear'
+import {
+  GEAR_BY_ID,
+  getSlotDurability,
+  isBossDropGear,
+  maxDurabilityForGear,
+  merchantBuyPrice,
+  newGearStack,
+  normalizeGearStack,
+  repairCostForStack,
+} from './gear'
 import { SALVAGE_BY_ID } from './salvage'
 import { applyInnateDamageBonuses } from './innates'
-import type { PlayerState, ShopConsumableId, ShopUpgradeId, SkillDef } from './types'
+import type {
+  EquipmentSlotId,
+  PlayerState,
+  ShopConsumableId,
+  ShopStatTomeId,
+  ShopUpgradeId,
+  SkillDef,
+} from './types'
 
 export interface MaxStats {
   maxHp: number
@@ -64,13 +83,25 @@ export function clampResource(current: number, max: number): number {
   return Math.min(max, Math.max(0, current))
 }
 
-export function applyMaxCaps(player: PlayerState): PlayerState {
-  const m = getMaxStats(player)
+export function clampPlayerBaseStats(player: PlayerState): PlayerState {
   return {
     ...player,
-    hp: clampResource(player.hp, m.maxHp),
-    stamina: clampResource(player.stamina, m.maxStamina),
-    mana: clampResource(player.mana, m.maxMana),
+    stats: {
+      strength: Math.min(MAX_PLAYER_STAT, Math.max(1, player.stats.strength)),
+      agility: Math.min(MAX_PLAYER_STAT, Math.max(1, player.stats.agility)),
+      intelligence: Math.min(MAX_PLAYER_STAT, Math.max(1, player.stats.intelligence)),
+    },
+  }
+}
+
+export function applyMaxCaps(player: PlayerState): PlayerState {
+  const p = clampPlayerBaseStats(player)
+  const m = getMaxStats(p)
+  return {
+    ...p,
+    hp: clampResource(p.hp, m.maxHp),
+    stamina: clampResource(p.stamina, m.maxStamina),
+    mana: clampResource(p.mana, m.maxMana),
   }
 }
 
@@ -93,9 +124,9 @@ export function addXp(player: PlayerState, amount: number): LevelUpResult {
       ...p,
       level: newLevel,
       stats: {
-        strength: p.stats.strength + 1,
-        agility: p.stats.agility + 1,
-        intelligence: p.stats.intelligence + 1,
+        strength: Math.min(MAX_PLAYER_STAT, p.stats.strength + 1),
+        agility: Math.min(MAX_PLAYER_STAT, p.stats.agility + 1),
+        intelligence: Math.min(MAX_PLAYER_STAT, p.stats.intelligence + 1),
       },
       xpToNext: xpRequiredForNextLevel(newLevel),
     }
@@ -120,18 +151,12 @@ export function tryBuyConsumable(player: PlayerState, id: ShopConsumableId): Pla
 
 export function tryBuyGear(player: PlayerState, gearId: string): PlayerState | null {
   const def = GEAR_BY_ID[gearId]
-  if (!def || player.gold < def.price) return null
+  if (!def || isBossDropGear(def) || player.gold < def.price) return null
   return applyMaxCaps({
     ...player,
     gold: player.gold - def.price,
-    gearOwned: [...player.gearOwned, gearId],
+    gearOwned: [...player.gearOwned, newGearStack(gearId)],
   })
-}
-
-function removeOneGearCopy(owned: readonly string[], itemId: string): string[] | null {
-  const i = owned.indexOf(itemId)
-  if (i === -1) return null
-  return [...owned.slice(0, i), ...owned.slice(i + 1)]
 }
 
 /** Sell one copy from pack only (not worn gear). Returns gold gained. */
@@ -153,20 +178,72 @@ export function trySellSalvageStack(
   }
 }
 
-export function trySellGearFromBag(player: PlayerState, gearId: string): { player: PlayerState; goldGained: number } | null {
-  const def = GEAR_BY_ID[gearId]
+export function trySellGearFromBag(
+  player: PlayerState,
+  packIndex: number,
+): { player: PlayerState; goldGained: number } | null {
+  if (!Number.isFinite(packIndex) || packIndex < 0 || packIndex !== Math.floor(packIndex)) return null
+  const stack = normalizeGearStack(player.gearOwned[packIndex])
+  if (!stack) return null
+  const def = GEAR_BY_ID[stack.gearId]
   if (!def) return null
-  const bag = removeOneGearCopy(player.gearOwned, gearId)
-  if (!bag) return null
   const goldGained = merchantBuyPrice(def)
+  const gearOwned = player.gearOwned.filter((_, i) => i !== packIndex)
   return {
     player: applyMaxCaps({
       ...player,
       gold: player.gold + goldGained,
-      gearOwned: bag,
+      gearOwned,
     }),
     goldGained,
   }
+}
+
+export function tryRepairGearInBag(player: PlayerState, packIndex: number): PlayerState | null {
+  if (!Number.isFinite(packIndex) || packIndex < 0 || packIndex !== Math.floor(packIndex)) return null
+  const stack = normalizeGearStack(player.gearOwned[packIndex])
+  if (!stack) return null
+  const cost = repairCostForStack(stack)
+  if (cost <= 0 || player.gold < cost) return null
+  const def = GEAR_BY_ID[stack.gearId]
+  if (!def) return null
+  const max = maxDurabilityForGear(def)
+  const repaired = { gearId: stack.gearId, durability: max }
+  const gearOwned = player.gearOwned.map((s, i) => (i === packIndex ? repaired : s))
+  return applyMaxCaps({ ...player, gold: player.gold - cost, gearOwned })
+}
+
+export function tryRepairEquippedSlot(player: PlayerState, slot: EquipmentSlotId): PlayerState | null {
+  const id = player.equipment[slot]
+  if (!id) return null
+  const cur = getSlotDurability(player, slot)
+  const cost = repairCostForStack({ gearId: id, durability: cur })
+  if (cost <= 0 || player.gold < cost) return null
+  const def = GEAR_BY_ID[id]
+  if (!def) return null
+  const max = maxDurabilityForGear(def)
+  return applyMaxCaps({
+    ...player,
+    gold: player.gold - cost,
+    equipmentDurability: { ...player.equipmentDurability, [slot]: max },
+  })
+}
+
+export function tryBuyStatTome(player: PlayerState, id: ShopStatTomeId): PlayerState | null {
+  const def = SHOP_STAT_TOMES.find((t) => t.id === id)
+  if (!def) return null
+  const cur = player.stats[def.stat]
+  if (cur >= MAX_PLAYER_STAT) return null
+  const price = statTomePrice(cur)
+  if (!Number.isFinite(price) || player.gold < price) return null
+  return applyMaxCaps({
+    ...player,
+    gold: player.gold - price,
+    stats: {
+      ...player.stats,
+      [def.stat]: Math.min(MAX_PLAYER_STAT, cur + 1),
+    },
+  })
 }
 
 export function tryBuyUpgrade(player: PlayerState, id: ShopUpgradeId): PlayerState | null {

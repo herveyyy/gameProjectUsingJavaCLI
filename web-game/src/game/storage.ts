@@ -1,8 +1,10 @@
-import { emptyPlayerEquipment } from './gear'
+import { MAX_PLAYER_STAT } from './constants'
+import { emptyPlayerEquipment, maxDurabilityForGearId, normalizeGearStack } from './gear'
 import { INNATE_BY_ID } from './innates'
 import { applyMaxCaps } from './progression'
 import type {
   EquipmentSlotId,
+  GearStack,
   PlayerEquipment,
   PlayerInventory,
   PlayerState,
@@ -67,8 +69,42 @@ function isEquipment(x: unknown): x is PlayerEquipment {
   return EQUIP_SLOTS.every((s) => o[s] === null || typeof o[s] === 'string')
 }
 
-function isGearOwned(x: unknown): x is string[] {
-  return Array.isArray(x) && x.every((i) => typeof i === 'string')
+function isGearStackRow(x: unknown): x is GearStack {
+  if (!x || typeof x !== 'object') return false
+  const o = x as Record<string, unknown>
+  return typeof o.gearId === 'string' && typeof o.durability === 'number'
+}
+
+function isGearOwned(x: unknown): x is GearStack[] {
+  return Array.isArray(x) && x.every(isGearStackRow)
+}
+
+function migrateGearOwned(raw: unknown): GearStack[] {
+  if (!Array.isArray(raw) || raw.length === 0) return []
+  const first = raw[0]
+  if (typeof first === 'string') {
+    return (raw as string[]).map((gearId) => ({
+      gearId,
+      durability: maxDurabilityForGearId(gearId),
+    }))
+  }
+  const out: GearStack[] = []
+  for (const row of raw) {
+    if (!row || typeof row !== 'object') continue
+    const o = row as Record<string, unknown>
+    if (typeof o.gearId !== 'string') continue
+    const d =
+      typeof o.durability === 'number' ? Math.max(0, o.durability) : maxDurabilityForGearId(o.gearId)
+    out.push({ gearId: o.gearId, durability: d })
+  }
+  return out
+}
+
+function isEquipmentDurability(x: unknown): x is Partial<Record<EquipmentSlotId, number>> {
+  if (!x || typeof x !== 'object') return false
+  return Object.entries(x as Record<string, unknown>).every(
+    ([k, v]) => EQUIP_SLOTS.includes(k as EquipmentSlotId) && typeof v === 'number',
+  )
 }
 
 function isSalvageLoot(x: unknown): x is Record<string, number> {
@@ -78,7 +114,7 @@ function isSalvageLoot(x: unknown): x is Record<string, number> {
   )
 }
 
-/** Strip legacy class fields; fill gear defaults. */
+/** Strip legacy class fields; migrate pack stacks & worn durability. */
 function migratePlayerShape(raw: unknown): unknown {
   if (!raw || typeof raw !== 'object') return raw
   const o = raw as Record<string, unknown>
@@ -86,15 +122,36 @@ function migratePlayerShape(raw: unknown): unknown {
   delete next.classKey
   delete next.classLabel
   delete next.skills
-  if (!isGearOwned(next.gearOwned)) {
-    next.gearOwned = []
-  }
+
+  const migratedPack = migrateGearOwned(next.gearOwned)
+  next.gearOwned = migratedPack
+    .map((row) => normalizeGearStack(row))
+    .filter((s): s is GearStack => s != null)
+
   if (!isSalvageLoot(next.salvageLoot)) {
     next.salvageLoot = {}
   }
   if (!isEquipment(next.equipment)) {
     next.equipment = emptyPlayerEquipment()
   }
+
+  const eq = next.equipment as PlayerEquipment
+  const ed: Partial<Record<EquipmentSlotId, number>> = {}
+  if (next.equipmentDurability && typeof next.equipmentDurability === 'object') {
+    const rawEd = next.equipmentDurability as Record<string, unknown>
+    for (const slot of EQUIP_SLOTS) {
+      const v = rawEd[slot]
+      if (typeof v === 'number') ed[slot] = Math.max(0, v)
+    }
+  }
+  for (const slot of EQUIP_SLOTS) {
+    const id = eq[slot]
+    if (id && typeof id === 'string' && ed[slot] === undefined) {
+      ed[slot] = maxDurabilityForGearId(id)
+    }
+  }
+  next.equipmentDurability = ed
+
   if (!Array.isArray(next.innates)) {
     next.innates = []
   } else {
@@ -102,6 +159,20 @@ function migratePlayerShape(raw: unknown): unknown {
       .filter((id): id is string => typeof id === 'string' && id in INNATE_BY_ID)
       .slice(0, 2)
   }
+
+  if (next.stats && typeof next.stats === 'object') {
+    const st = next.stats as Record<string, unknown>
+    const clampStat = (v: unknown) => {
+      const n = typeof v === 'number' && Number.isFinite(v) ? v : 3
+      return Math.min(MAX_PLAYER_STAT, Math.max(1, Math.floor(n)))
+    }
+    next.stats = {
+      strength: clampStat(st.strength),
+      agility: clampStat(st.agility),
+      intelligence: clampStat(st.intelligence),
+    }
+  }
+
   return next
 }
 
@@ -116,11 +187,21 @@ function isValidPlayer(p: unknown): p is PlayerState {
   const st = o.stats as Record<string, unknown>
   if (typeof st.strength !== 'number' || typeof st.agility !== 'number' || typeof st.intelligence !== 'number')
     return false
+  if (
+    st.strength < 1 ||
+    st.strength > MAX_PLAYER_STAT ||
+    st.agility < 1 ||
+    st.agility > MAX_PLAYER_STAT ||
+    st.intelligence < 1 ||
+    st.intelligence > MAX_PLAYER_STAT
+  )
+    return false
   if (!isUpgrades(o.upgrades)) return false
   if (!isInventory(o.inventory)) return false
   if (!isGearOwned(o.gearOwned)) return false
   if (!isSalvageLoot(o.salvageLoot)) return false
   if (!isEquipment(o.equipment)) return false
+  if (!isEquipmentDurability(o.equipmentDurability)) return false
   if (!Array.isArray(o.innates) || o.innates.length > 2) return false
   if (!o.innates.every((i) => typeof i === 'string')) return false
   return true

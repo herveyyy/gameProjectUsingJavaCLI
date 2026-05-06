@@ -1,5 +1,5 @@
-import { SHOP_CONSUMABLES, SHOP_UPGRADES } from './constants'
-import { EQUIPMENT_SLOT_LABELS, GEAR_CATALOG, getCombatSkillEntries } from './gear'
+import { SHOP_CONSUMABLES, SHOP_STAT_TOMES, SHOP_UPGRADES } from './constants'
+import { EQUIPMENT_SLOT_LABELS, GEAR_ARCHETYPE_LABELS, GEAR_CATALOG, getCombatSkillEntries } from './gear'
 import { getEffectiveStats } from './innates'
 import { applyMaxCaps, getMaxStats } from './progression'
 import type { PlayerState } from './types'
@@ -26,7 +26,15 @@ export function warmGameCaches(saved: PlayerState | null): void {
   const q = ''
   SHOP_CONSUMABLES.filter((c) => shopTextMatches(q, c.name, c.description))
   SHOP_UPGRADES.filter((u) => shopTextMatches(q, u.name, u.description))
+  SHOP_STAT_TOMES.filter((t) => shopTextMatches(q, t.name, t.description))
   GEAR_CATALOG.filter((g) =>
-    shopTextMatches(q, g.name, g.description, EQUIPMENT_SLOT_LABELS[g.slot], g.skill.name),
+    shopTextMatches(
+      q,
+      g.name,
+      g.description,
+      EQUIPMENT_SLOT_LABELS[g.slot],
+      GEAR_ARCHETYPE_LABELS[g.archetype],
+      g.skill.name,
+    ),
   )
 }

@@ -32,6 +32,11 @@ export type EquipmentSlotId =
   | 'mainHand'
   | 'offHand'
 
+/**
+ * Kit flavor: common tiers (shop + world drops) plus boss-only **mystic** / **legend** weapons.
+ */
+export type GearArchetypeId = 'warrior' | 'rogue' | 'mage' | 'hybrid' | 'mystic' | 'legend'
+
 export interface PlayerEquipment {
   head: string | null
   ears: string | null
@@ -43,6 +48,12 @@ export interface PlayerEquipment {
   feet: string | null
   mainHand: string | null
   offHand: string | null
+}
+
+/** One stack in pack — duplicates are separate stacks with their own durability. */
+export interface GearStack {
+  gearId: string
+  durability: number
 }
 
 /** Minimum stats to equip; omit a key when there is no requirement for that stat. */
@@ -57,6 +68,7 @@ export interface GearItemDef {
   id: string
   name: string
   slot: EquipmentSlotId
+  archetype: GearArchetypeId
   description: string
   price: number
   skill: SkillDef
@@ -79,9 +91,11 @@ export interface PlayerState {
   stats: { strength: number; agility: number; intelligence: number }
   upgrades: PlayerUpgrades
   inventory: PlayerInventory
-  /** Item ids in the bag (multiset — duplicates allowed). */
-  gearOwned: string[]
+  /** Gear in pack — each entry is its own stack with durability. */
+  gearOwned: GearStack[]
   equipment: PlayerEquipment
+  /** Current durability for worn pieces (must align with equipment slots that hold gear). */
+  equipmentDurability: Partial<Record<EquipmentSlotId, number>>
   /** Stackable mob salvage — sell-only at the merchant (item id → count). */
   salvageLoot: Record<string, number>
 }
@@ -95,6 +109,8 @@ export interface EnemyState {
   damage: number
   goldReward: number
   xpReward: number
+  /** Region boss — drops mystic / legend weapons only (never merchant stock). */
+  isBoss?: boolean
 }
 
 export interface BattleState {
@@ -106,6 +122,7 @@ export type Phase =
   | 'name'
   | 'adventure'
   | 'shop'
+  | 'blacksmith'
   | 'gear'
   | 'battle_menu'
   | 'pick_skill'
@@ -133,6 +150,17 @@ export interface ShopUpgradeDef {
   icon: 'heart' | 'sword' | 'spark' | 'wind'
 }
 
+export type ShopStatTomeId = 'strengthTome' | 'agilityTome' | 'intelligenceTome'
+
+/** Permanent +1 STR / AGI / INT — gold cost scales with current value; capped at 999 each. */
+export interface ShopStatTomeDef {
+  id: ShopStatTomeId
+  stat: 'strength' | 'agility' | 'intelligence'
+  name: string
+  description: string
+  icon: 'book'
+}
+
 export type PlaceId =
   | 'sunlit_meadow'
   | 'whisper_Wela'
@@ -140,6 +168,12 @@ export type PlaceId =
   | 'ruined_tower'
   | 'frostpeak_pass'
   | 'obsidian_depths'
+  | 'amber_glades'
+  | 'sunken_court'
+  | 'ember_highlands'
+  | 'veilgrave_catacombs'
+  | 'stormbreak_coast'
+  | 'astral_spire'
 
 export interface PlaceDef {
   id: PlaceId

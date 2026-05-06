@@ -44,7 +44,7 @@ export function AdventurerPortrait({ size = 56 }: { size?: number }) {
   )
 }
 
-type ShopVisual = 'potion' | 'vial' | 'leaf' | 'heart' | 'sword' | 'spark' | 'wind'
+type ShopVisual = 'potion' | 'vial' | 'leaf' | 'heart' | 'sword' | 'spark' | 'wind' | 'book'
 
 export function ShopIcon({ kind, size = 28 }: { kind: ShopVisual; size?: number }) {
   const w = size
@@ -99,6 +99,19 @@ export function ShopIcon({ kind, size = 28 }: { kind: ShopVisual; size?: number 
         <svg width={w} height={h} viewBox="0 0 24 24" aria-hidden>
           <path d="M4 14c4-8 10-8 14 0" fill="none" stroke="#6ee7b7" strokeWidth="3" />
           <path d="M4 18c5-6 11-6 16 0" fill="none" stroke={ink} strokeWidth="2" />
+        </svg>
+      )
+    case 'book':
+      return (
+        <svg width={w} height={h} viewBox="0 0 24 24" aria-hidden>
+          <path
+            d="M6 4h6a3 3 0 013 3v14a3 3 0 00-3-3H6V4zM18 4h-6a3 3 0 00-3 3v14a3 3 0 013-3h6V4z"
+            fill="#fde68a"
+            stroke={ink}
+            strokeWidth="2"
+            strokeLinejoin="round"
+          />
+          <path d="M9 8h3M15 8h3M9 12h3M15 12h3" stroke={ink} strokeWidth="1.5" strokeLinecap="round" />
         </svg>
       )
     default:
