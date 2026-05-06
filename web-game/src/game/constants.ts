@@ -9,6 +9,7 @@ import type {
   ShopConsumableDef,
   ShopStatTomeDef,
   ShopUpgradeDef,
+  StatusApply,
 } from './types'
 
 /** Single template — no classes; growth comes from level, upgrades, and gear you can wear (stat gates). */
@@ -369,6 +370,15 @@ export function buildPlayer(name: string): PlayerState {
   }
 }
 
+/** Statuses inflicted on the player when this mob lands a hit (deterministic). */
+export const COMBAT_MOB_ON_HIT: Partial<Record<number, StatusApply[]>> = {
+  5: [{ id: 'bleeding', turns: 2, potency: 2 }],
+  9: [{ id: 'chilled', turns: 2, potency: 2 }],
+  11: [{ id: 'poisoned', turns: 3, potency: 3 }],
+  17: [{ id: 'burning', turns: 2, potency: 4 }],
+  12: [{ id: 'stunned', turns: 1 }],
+}
+
 export function mobRewards(mobId: number): { gold: number; xp: number } {
   if (isBossMob(mobId)) {
     return { gold: 130 + mobId * 3, xp: 85 + mobId * 3 }
@@ -392,6 +402,7 @@ export function spawnEnemyFromRoll(id: number): EnemyState {
     goldReward: gold,
     xpReward: xp,
     isBoss: isBossMob(id),
+    playerStatusesOnHit: COMBAT_MOB_ON_HIT[id],
   }
 }
 

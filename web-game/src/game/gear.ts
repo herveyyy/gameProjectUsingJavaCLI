@@ -88,7 +88,13 @@ export const GEAR_CATALOG: readonly GearItemDef[] = [
     description: 'Heavy visor; bashers train strikes through the helm.',
     price: 55,
     requirements: { strength: 5 },
-    skill: { name: 'Visor Bash', damage: 6, manaCost: 0, staminaCost: 4 },
+    skill: {
+      name: 'Visor Bash',
+      damage: 6,
+      manaCost: 0,
+      staminaCost: 4,
+      statusOnHit: { target: [{ id: 'stunned', turns: 1 }] },
+    },
   },
   {
     id: 'gear_circlet_whisper',
@@ -98,7 +104,12 @@ export const GEAR_CATALOG: readonly GearItemDef[] = [
     description: 'Thin silver band humming with wind cantrips.',
     price: 42,
     requirements: { intelligence: 4 },
-    skill: { name: 'Mind Gale', damage: 7, manaCost: 8 },
+    skill: {
+      name: 'Mind Gale',
+      damage: 7,
+      manaCost: 8,
+      statusOnHit: { self: [{ id: 'empowered', turns: 1, potency: 6 }] },
+    },
   },
   {
     id: 'gear_pearl_earrings',
@@ -138,7 +149,12 @@ export const GEAR_CATALOG: readonly GearItemDef[] = [
     description: 'Warm coal shard on a bronze chain.',
     price: 48,
     requirements: { intelligence: 5 },
-    skill: { name: 'Coal Bloom', damage: 10, manaCost: 10 },
+    skill: {
+      name: 'Coal Bloom',
+      damage: 10,
+      manaCost: 10,
+      statusOnHit: { target: [{ id: 'burning', turns: 2, potency: 4 }] },
+    },
   },
   {
     id: 'gear_leather_tunic',
@@ -329,7 +345,12 @@ export const GEAR_CATALOG: readonly GearItemDef[] = [
     description: 'Rubies that warm when battle nears.',
     price: 44,
     requirements: { agility: 5 },
-    skill: { name: 'Pin Bleed', damage: 9, manaCost: 6 },
+    skill: {
+      name: 'Pin Bleed',
+      damage: 9,
+      manaCost: 6,
+      statusOnHit: { target: [{ id: 'bleeding', turns: 3, potency: 3 }] },
+    },
   },
   {
     id: 'gear_echo_loops',
@@ -339,7 +360,12 @@ export const GEAR_CATALOG: readonly GearItemDef[] = [
     description: 'Hoops that replay your insult on impact.',
     price: 52,
     requirements: { intelligence: 6 },
-    skill: { name: 'Reverb Hex', damage: 10, manaCost: 8 },
+    skill: {
+      name: 'Reverb Hex',
+      damage: 10,
+      manaCost: 8,
+      statusOnHit: { target: [{ id: 'poisoned', turns: 3, potency: 3 }] },
+    },
   },
   {
     id: 'gear_torque_wolf',
@@ -389,7 +415,13 @@ export const GEAR_CATALOG: readonly GearItemDef[] = [
     description: 'Heat-sealed runes hum when you block.',
     price: 60,
     requirements: { strength: 7 },
-    skill: { name: 'Sigil Shove', damage: 11, manaCost: 0, staminaCost: 8 },
+    skill: {
+      name: 'Sigil Shove',
+      damage: 11,
+      manaCost: 0,
+      staminaCost: 8,
+      statusOnHit: { self: [{ id: 'shielded', turns: 2, potency: 18 }] },
+    },
   },
   {
     id: 'gear_gloves_duelist',
@@ -409,7 +441,12 @@ export const GEAR_CATALOG: readonly GearItemDef[] = [
     description: 'Weft of hoarfrost — leaves rime on whatever it brushes.',
     price: 70,
     requirements: { intelligence: 7 },
-    skill: { name: 'Rime Wake', damage: 13, manaCost: 12 },
+    skill: {
+      name: 'Rime Wake',
+      damage: 13,
+      manaCost: 12,
+      statusOnHit: { target: [{ id: 'chilled', turns: 2, potency: 3 }] },
+    },
   },
   {
     id: 'gear_cape_harrier',

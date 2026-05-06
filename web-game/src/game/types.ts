@@ -1,3 +1,26 @@
+export type StatusEffectId =
+  | 'burning'
+  | 'poisoned'
+  | 'bleeding'
+  | 'chilled'
+  | 'stunned'
+  | 'shielded'
+  | 'empowered'
+
+/** Applied when a skill or enemy hit connects. */
+export interface StatusApply {
+  id: StatusEffectId
+  turns: number
+  potency?: number
+}
+
+export interface SkillStatusOnHit {
+  /** Applied to the enemy (PvE) or defender (PvP). */
+  target?: StatusApply[]
+  /** Applied to the attacker. */
+  self?: StatusApply[]
+}
+
 export interface SkillDef {
   name: string
   damage: number
@@ -5,6 +28,8 @@ export interface SkillDef {
   manaCost: number
   /** STA spent when greater than zero — stamina-only skills use this with `manaCost: 0`. */
   staminaCost?: number
+  /** Optional debuffs/buffs applied when the strike connects. */
+  statusOnHit?: SkillStatusOnHit
 }
 
 export interface PlayerUpgrades {
@@ -111,11 +136,22 @@ export interface EnemyState {
   xpReward: number
   /** Region boss — drops mystic / legend weapons only (never merchant stock). */
   isBoss?: boolean
+  /** Statuses applied to the player when this enemy hits (deterministic). */
+  playerStatusesOnHit?: StatusApply[]
+}
+
+/** Active combat ailments — parallel arrays per combatant in PvE. */
+export interface CombatStatusEntry {
+  id: StatusEffectId
+  turns: number
+  potency?: number
 }
 
 export interface BattleState {
   enemyHp: number
   playerHp: number
+  playerStatuses: CombatStatusEntry[]
+  enemyStatuses: CombatStatusEntry[]
 }
 
 export type Phase =
@@ -129,6 +165,11 @@ export type Phase =
   | 'use_item_battle'
   | 'confirm_home'
   | 'done'
+  | 'multiplayer_hub'
+  | 'pvp_host_wait'
+  | 'pvp_rps'
+  | 'pvp_battle_menu'
+  | 'pvp_pick_skill'
 
 export type ShopConsumableId = 'healthPotion' | 'manaDraught' | 'staminaBrew'
 
