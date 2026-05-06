@@ -1,5 +1,3 @@
-import type { ClassKey } from '../game/types'
-
 const ink = '#0a0a0a'
 
 export function IconCoin({ size = 20 }: { size?: number }) {
@@ -34,36 +32,9 @@ export function IconXpSpark({ size = 18 }: { size?: number }) {
   )
 }
 
-export function ClassPortrait({ classKey, size = 56 }: { classKey: ClassKey; size?: number }) {
+/** Neutral traveler — build is defined by equipment, not class. */
+export function AdventurerPortrait({ size = 56 }: { size?: number }) {
   const common = { width: size, height: size, viewBox: '0 0 48 48', 'aria-hidden': true as const }
-  if (classKey === 'warrior') {
-    return (
-      <svg {...common}>
-        <rect x="6" y="8" width="36" height="36" rx="6" fill="#99f6e4" stroke={ink} strokeWidth="3" />
-        <path d="M14 38 L24 14 L34 38 Z" fill="#fb7185" stroke={ink} strokeWidth="2" />
-        <rect x="20" y="18" width="8" height="10" fill="#fef08a" stroke={ink} strokeWidth="2" />
-      </svg>
-    )
-  }
-  if (classKey === 'rogue') {
-    return (
-      <svg {...common}>
-        <rect x="6" y="8" width="36" height="36" rx="6" fill="#fbcfe8" stroke={ink} strokeWidth="3" />
-        <circle cx="24" cy="26" r="10" fill="#a7f3d0" stroke={ink} strokeWidth="2" />
-        <path d="M24 16 L30 10 L32 14 Z" fill="#0a0a0a" />
-      </svg>
-    )
-  }
-  if (classKey === 'ranger') {
-    return (
-      <svg {...common}>
-        <rect x="6" y="8" width="36" height="36" rx="6" fill="#d9f99d" stroke={ink} strokeWidth="3" />
-        <path d="M12 18 L24 12 L36 18 L36 34 L12 34 Z" fill="#86efac" stroke={ink} strokeWidth="2" />
-        <path d="M22 14 L28 8 L30 12 Z" fill="#15803d" stroke={ink} strokeWidth="1.5" />
-        <circle cx="18" cy="26" r="3" fill="#fef08a" stroke={ink} strokeWidth="1.5" />
-      </svg>
-    )
-  }
   return (
     <svg {...common}>
       <rect x="6" y="8" width="36" height="36" rx="6" fill="#e9d5ff" stroke={ink} strokeWidth="3" />
@@ -137,4 +108,48 @@ export function ShopIcon({ kind, size = 28 }: { kind: ShopVisual; size?: number 
         </svg>
       )
   }
+}
+
+/** Browser fullscreen: expand vs restore (matches lucide maximize2 / minimize2). */
+export function IconFullscreen({ expanded, size = 20 }: { expanded: boolean; size?: number }) {
+  const ink = '#0a0a0a'
+  const sw = 2
+  if (expanded) {
+    return (
+      <svg
+        width={size}
+        height={size}
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke={ink}
+        strokeWidth={sw}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden
+      >
+        <polyline points="4 14 10 14 10 20" />
+        <polyline points="20 10 14 10 14 4" />
+        <line x1="14" y1="10" x2="21" y2="3" />
+        <line x1="3" y1="21" x2="10" y2="14" />
+      </svg>
+    )
+  }
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke={ink}
+      strokeWidth={sw}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <polyline points="15 3 21 3 21 9" />
+      <polyline points="9 21 3 21 3 15" />
+      <line x1="21" y1="3" x2="14" y2="10" />
+      <line x1="3" y1="21" x2="10" y2="14" />
+    </svg>
+  )
 }

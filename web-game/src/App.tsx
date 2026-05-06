@@ -1,34 +1,54 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
-import { ClassPortrait, IconCoin, IconXpSpark, ShopIcon } from './components/GameIcons'
-import { SkillTreePanel } from './components/SkillTreePanel'
+import { AdventurerPortrait, IconCoin, IconFullscreen, IconXpSpark, ShopIcon } from './components/GameIcons'
+import {
+  COMBAT_GEAR_SLOT_ORDER,
+  describeEquipBlock,
+  EQUIPMENT_SLOT_LABELS,
+  formatRequirements,
+  GEAR_BY_ID,
+  GEAR_CATALOG,
+  merchantBuyPrice,
+  getCombatSkillEntries,
+  playerMeetsStatRequirements,
+  tryEquipFromBag,
+  tryUnequipSlot,
+} from './game/gear'
 import {
   PLACES,
   SHOP_CONSUMABLES,
   SHOP_UPGRADES,
+  STARTER_FREE_KIT,
   buildPlayer,
-  getSkillTierIndexForLevel,
   rollEncounterForPlace,
   spawnEnemyFromRoll,
   upgradePrice,
 } from './game/constants'
+import { enemyAttackHits, formatInnateShort, getEffectiveStats, INNATE_BY_ID } from './game/innates'
 import {
   addXp,
   applyMaxCaps,
+  formatSkillResourceDef,
   getEffectiveManaCost,
   getEffectiveSkillDamage,
+  getEffectiveStaminaCost,
   getMaxStats,
   tryBuyConsumable,
+  tryBuyGear,
   tryBuyUpgrade,
+  trySellGearFromBag,
+  trySellSalvageStack,
   tryUseHealthPotion,
   tryUseManaDraught,
   tryUseStaminaBrew,
 } from './game/progression'
+import { rollBattleLoot } from './game/loot'
+import { SALVAGE_BY_ID, addSalvageStacks, rollSalvageLoot } from './game/salvage'
 import { clearProgress, hasSavedGame, loadProgress, saveProgress } from './game/storage'
 import type {
   BattleState,
-  ClassKey,
   EnemyState,
+  EquipmentSlotId,
   Phase,
   PlaceDef,
   PlayerState,
@@ -47,12 +67,13 @@ export default function App() {
   const [hasSave, setHasSave] = useState(() => hasSavedGame())
   const [phase, setPhase] = useState<Phase>('name')
   const [playerNameInput, setPlayerNameInput] = useState('')
-  const [playerName, setPlayerName] = useState('')
   const [player, setPlayer] = useState<PlayerState | null>(null)
   const [enemy, setEnemy] = useState<EnemyState | null>(null)
   const [battle, setBattle] = useState<BattleState | null>(null)
-  const [skillTreeOpen, setSkillTreeOpen] = useState(false)
   const logRef = useRef<HTMLDivElement>(null)
+  const [browserFullscreen, setBrowserFullscreen] = useState(
+    () => typeof document !== 'undefined' && !!document.fullscreenElement,
+  )
   const [logLines, setLogLines] = useState<string[]>([
     "Unknown Entity: What's your name, human?",
   ])
@@ -72,25 +93,31 @@ export default function App() {
   }, [player, screen])
 
   useEffect(() => {
-    if (!skillTreeOpen) return
-    const prevOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setSkillTreeOpen(false)
+    const sync = () => setBrowserFullscreen(!!document.fullscreenElement)
+    document.addEventListener('fullscreenchange', sync)
+    return () => document.removeEventListener('fullscreenchange', sync)
+  }, [])
+
+  const toggleBrowserFullscreen = useCallback(() => {
+    const go = async () => {
+      try {
+        if (document.fullscreenElement) {
+          await document.exitFullscreen()
+        } else {
+          await document.documentElement.requestFullscreen()
+        }
+      } catch {
+        /* user gesture / unsupported */
+      }
     }
-    window.addEventListener('keydown', onKey)
-    return () => {
-      document.body.style.overflow = prevOverflow
-      window.removeEventListener('keydown', onKey)
-    }
-  }, [skillTreeOpen])
+    void go()
+  }, [])
 
   const resetToName = useCallback(() => {
     clearProgress()
     setHasSave(false)
     setPhase('name')
     setPlayerNameInput('')
-    setPlayerName('')
     setPlayer(null)
     setEnemy(null)
     setBattle(null)
@@ -102,7 +129,6 @@ export default function App() {
     setBattle(null)
     setPlayer(null)
     setPhase('name')
-    setPlayerName('')
     setPlayerNameInput('')
     setLogLines([])
     setScreen('menu')
@@ -120,7 +146,6 @@ export default function App() {
     setScreen('game')
     if (saved) {
       setPlayer(saved)
-      setPlayerName(saved.name)
       setPlayerNameInput(saved.name)
       setPhase('adventure')
       setEnemy(null)
@@ -132,7 +157,6 @@ export default function App() {
       ])
     } else {
       setPlayer(null)
-      setPlayerName('')
       setPlayerNameInput('')
       setPhase('name')
       setEnemy(null)
@@ -146,7 +170,6 @@ export default function App() {
     setHasSave(false)
     setScreen('game')
     setPlayer(null)
-    setPlayerName('')
     setPlayerNameInput('')
     setEnemy(null)
     setBattle(null)
@@ -154,25 +177,28 @@ export default function App() {
     setLogLines(["Unknown Entity: What's your name, human?"])
   }, [])
 
-  const startClass = useCallback(() => {
+  const beginAdventure = useCallback(() => {
     const n = playerNameInput.trim()
     if (!n) return
-    setPlayerName(n)
-    setPhase('class')
-    appendLog(`Hi ${n}. Choose your class.`)
+    const p = applyMaxCaps(buildPlayer(n))
+    setPlayer(p)
+    appendLog(
+      `You wake with a free traveler's kit (${Object.keys(STARTER_FREE_KIT).length} pieces already equipped — earrings, gorget, cloak, leggings, boots).`,
+    )
+    appendLog(`Hi ${n}. Combat techniques come from gear — stats + innate gifts decide what you can wear.`)
+    for (const id of p.innates) {
+      const inn = INNATE_BY_ID[id]
+      appendLog(
+        inn ? `Innate gift [${inn.rank}]: ${inn.name} — ${inn.description}` : `Innate gift: ${id}`,
+      )
+    }
+    if (p.innates.length > 1) {
+      appendLog('The stars aligned: a second innate awakened with you (≈0.001% chance).')
+    }
+    appendLog('Gold and XP drop from fights; monsters leave junk and sometimes armor salvage — sell spares at the merchant.')
+    appendLog('Open the shop for more arms and armor; manage slots under Equipment.')
+    setPhase('adventure')
   }, [appendLog, playerNameInput])
-
-  const chooseClass = useCallback(
-    (key: ClassKey) => {
-      const p = applyMaxCaps(buildPlayer(key, playerName.trim() || playerNameInput.trim()))
-      setPlayer(p)
-      appendLog(`You chose to be a ${p.classLabel}.`)
-      appendLog('Gold and XP drop from fights. Pick a region matching your level — or risk harder turf.')
-      appendLog('Visit the shop anytime. Where will you go?')
-      setPhase('adventure')
-    },
-    [appendLog, playerName, playerNameInput],
-  )
 
   const beginEncounterAt = useCallback(
     (place: PlaceDef) => {
@@ -210,12 +236,13 @@ export default function App() {
     const m = getMaxStats(player)
     const hpFull = player.hp >= m.maxHp
     const mpFull = player.mana >= m.maxMana
-    if (hpFull && mpFull) {
-      appendLog('You relax at the inn. HP and MP are already topped off.')
+    const staFull = player.stamina >= m.maxStamina
+    if (hpFull && mpFull && staFull) {
+      appendLog('You relax at the inn. HP, MP, and STA are already topped off.')
       return
     }
-    setPlayer(applyMaxCaps({ ...player, hp: m.maxHp, mana: m.maxMana }))
-    appendLog('You rest at the inn. HP and MP are fully restored.')
+    setPlayer(applyMaxCaps({ ...player, hp: m.maxHp, mana: m.maxMana, stamina: m.maxStamina }))
+    appendLog('You rest at the inn. HP, MP, and STA are fully restored.')
   }, [appendLog, player])
 
   const confirmGoHome = useCallback(() => {
@@ -226,31 +253,59 @@ export default function App() {
   const resolveTurn = useCallback(
     (skillIndex: number) => {
       if (!player || !enemy || !battle) return
-      const sk = player.skills[skillIndex]
-      const cost = getEffectiveManaCost(player, sk)
+      const entries = getCombatSkillEntries(player)
+      const entry = entries[skillIndex]
+      if (!entry) return
+      const sk = entry.skill
+      const mpCost = getEffectiveManaCost(player, sk)
+      const staCost = getEffectiveStaminaCost(player, sk)
       const dmg = getEffectiveSkillDamage(player, sk)
 
-      if (cost > player.mana + 1e-6) {
-        appendLog(`Not enough mana for ${sk.name} (needs ${fmt(cost)}).`)
+      if (mpCost > player.mana + 1e-6) {
+        appendLog(`Not enough mana for ${sk.name} (needs ${fmt(mpCost)}).`)
+        setPhase('battle_menu')
+        return
+      }
+      if (staCost > player.stamina + 1e-6) {
+        appendLog(`Not enough stamina for ${sk.name} (needs ${fmt(staCost)}).`)
         setPhase('battle_menu')
         return
       }
 
       let nextPlayer: PlayerState = applyMaxCaps({
         ...player,
-        mana: player.mana - cost,
+        mana: player.mana - mpCost,
+        stamina: player.stamina - staCost,
       })
       setPlayer(nextPlayer)
 
       const b = { ...battle }
       b.enemyHp -= dmg
-      appendLog(`You use ${sk.name} — deals ${dmg} damage.`)
+      const skillLine =
+        entry.kind === 'gear' && entry.gearId
+          ? `${sk.name} (${GEAR_BY_ID[entry.gearId]?.name ?? 'gear'})`
+          : sk.name
+      appendLog(`You use ${skillLine} — deals ${dmg} damage.`)
 
       if (b.enemyHp <= 0) {
         appendLog('You won!')
         let won: PlayerState = { ...nextPlayer, hp: b.playerHp }
         won.gold += enemy.goldReward
         appendLog(`Loot: +${enemy.goldReward} gold.`)
+
+        const dropId = rollBattleLoot(enemy.id)
+        if (dropId) {
+          won = { ...won, gearOwned: [...won.gearOwned, dropId] }
+          const dropName = GEAR_BY_ID[dropId]?.name ?? dropId
+          appendLog(`Salvage drop: ${dropName} — sent to your pack (sell at the shop or equip under Equipment).`)
+        }
+
+        const junkId = rollSalvageLoot(enemy.id)
+        if (junkId) {
+          won = addSalvageStacks(won, junkId, 1)
+          const junkName = SALVAGE_BY_ID[junkId]?.name ?? junkId
+          appendLog(`Loot: ${junkName} — junk stacks in salvage (sell at the merchant).`)
+        }
 
         const xpGain = addXp(won, enemy.xpReward)
         won = xpGain.player
@@ -265,8 +320,12 @@ export default function App() {
         return
       }
 
-      appendLog(`${enemy.name} uses ${enemy.skill} — deals ${enemy.damage} damage.`)
-      b.playerHp -= enemy.damage
+      if (!enemyAttackHits(nextPlayer)) {
+        appendLog(`${enemy.name} tries ${enemy.skill} — you slip aside!`)
+      } else {
+        appendLog(`${enemy.name} uses ${enemy.skill} — deals ${enemy.damage} damage.`)
+        b.playerHp -= enemy.damage
+      }
 
       if (b.playerHp <= 0) {
         appendLog('You died.')
@@ -316,6 +375,72 @@ export default function App() {
     [appendLog, player],
   )
 
+  const buyGear = useCallback(
+    (gearId: string) => {
+      if (!player) return
+      const next = tryBuyGear(player, gearId)
+      if (!next) {
+        appendLog('Not enough gold.')
+        return
+      }
+      const label = GEAR_BY_ID[gearId]?.name ?? gearId
+      setPlayer(next)
+      appendLog(`Purchased ${label}. It is in your pack — equip it from Equipment.`)
+    },
+    [appendLog, player],
+  )
+
+  const sellGearFromPack = useCallback(
+    (gearId: string) => {
+      if (!player) return
+      const result = trySellGearFromBag(player, gearId)
+      if (!result) return
+      const label = GEAR_BY_ID[gearId]?.name ?? gearId
+      setPlayer(result.player)
+      appendLog(`Sold ${label} to the merchant for ${result.goldGained} gold.`)
+    },
+    [appendLog, player],
+  )
+
+  const sellSalvageStack = useCallback(
+    (salvageId: string) => {
+      if (!player) return
+      const result = trySellSalvageStack(player, salvageId)
+      if (!result) return
+      const label = SALVAGE_BY_ID[salvageId]?.name ?? salvageId
+      setPlayer(result.player)
+      appendLog(`Sold 1× ${label} for ${result.goldGained} gold.`)
+    },
+    [appendLog, player],
+  )
+
+  const equipFromBag = useCallback(
+    (itemId: string) => {
+      if (!player) return
+      const why = describeEquipBlock(player, itemId)
+      if (why) {
+        appendLog(why)
+        return
+      }
+      const next = tryEquipFromBag(player, itemId)
+      if (!next) return
+      setPlayer(next)
+      appendLog(`Equipped ${GEAR_BY_ID[itemId]?.name ?? itemId}.`)
+    },
+    [appendLog, player],
+  )
+
+  const unequipSlot = useCallback(
+    (slot: EquipmentSlotId) => {
+      if (!player) return
+      const next = tryUnequipSlot(player, slot)
+      if (!next) return
+      setPlayer(next)
+      appendLog(`Removed ${EQUIPMENT_SLOT_LABELS[slot]} piece to your pack.`)
+    },
+    [appendLog, player],
+  )
+
   const usePotionAdventure = useCallback(
     (kind: 'hp' | 'mana' | 'sta') => {
       if (!player) return
@@ -331,6 +456,7 @@ export default function App() {
   )
 
   const maxStats = player ? getMaxStats(player) : null
+  const effStats = player ? getEffectiveStats(player) : null
   const xpPct = player && player.xpToNext > 0 ? Math.min(100, (player.xp / player.xpToNext) * 100) : 0
 
   const actions = useMemo(() => {
@@ -345,26 +471,8 @@ export default function App() {
             onChange={(e) => setPlayerNameInput(e.target.value)}
             aria-label="Player name"
           />
-          <button type="button" onClick={startClass}>
+          <button type="button" onClick={beginAdventure}>
             Continue
-          </button>
-        </div>
-      )
-    }
-    if (phase === 'class') {
-      return (
-        <div className="rpg-actions">
-          <button type="button" onClick={() => chooseClass('warrior')}>
-            1. Warrior
-          </button>
-          <button type="button" onClick={() => chooseClass('rogue')}>
-            2. Rogue
-          </button>
-          <button type="button" onClick={() => chooseClass('mage')}>
-            3. Mage
-          </button>
-          <button type="button" onClick={() => chooseClass('ranger')}>
-            4. Ranger
           </button>
         </div>
       )
@@ -374,6 +482,7 @@ export default function App() {
         <>
           <div className="rpg-places-section">
             <h3 className="rpg-places-heading">Choose a destination</h3>
+            <div className="rpg-places-scroll">
             <div className="rpg-places-grid">
               {PLACES.map((place) => {
                 const risky = player ? player.level < place.levelMin : false
@@ -393,10 +502,14 @@ export default function App() {
                 )
               })}
             </div>
+            </div>
           </div>
           <div className="rpg-actions">
             <button type="button" onClick={() => setPhase('shop')}>
               Open shop
+            </button>
+            <button type="button" onClick={() => setPhase('gear')}>
+              Equipment
             </button>
             <button type="button" onClick={restAtInn}>
               Rest at inn
@@ -433,6 +546,15 @@ export default function App() {
         <div className="rpg-actions">
           <button type="button" onClick={() => setPhase('adventure')}>
             Leave shop
+          </button>
+        </div>
+      )
+    }
+    if (phase === 'gear' && player) {
+      return (
+        <div className="rpg-actions">
+          <button type="button" onClick={() => setPhase('adventure')}>
+            Back to journey
           </button>
         </div>
       )
@@ -494,14 +616,21 @@ export default function App() {
       )
     }
     if (phase === 'pick_skill' && player && enemy) {
+      const combatSkills = getCombatSkillEntries(player)
       return (
         <div className="rpg-actions">
-          {player.skills.map((sk, idx) => {
-            const eff = getEffectiveSkillDamage(player, sk)
-            const mc = getEffectiveManaCost(player, sk)
+          {combatSkills.map((ent, idx) => {
+            const eff = getEffectiveSkillDamage(player, ent.skill)
+            const mc = getEffectiveManaCost(player, ent.skill)
+            const sc = getEffectiveStaminaCost(player, ent.skill)
+            const costBits = [
+              mc > 1e-9 ? `${fmt(mc)} MP` : null,
+              sc > 1e-9 ? `${fmt(sc)} STA` : null,
+            ].filter(Boolean)
+            const costStr = costBits.length ? costBits.join(' · ') : 'Free'
             return (
-              <button key={`${sk.name}-${idx}`} type="button" onClick={() => resolveTurn(idx)}>
-                {idx + 1}. {sk.name} ({eff} · {fmt(mc)} MP)
+              <button key={`${ent.label}-${idx}`} type="button" onClick={() => resolveTurn(idx)}>
+                {idx + 1}. {ent.label} ({eff} · {costStr})
               </button>
             )
           })}
@@ -581,10 +710,13 @@ export default function App() {
     return null
   }, [
     appendLog,
+    beginAdventure,
     beginEncounterAt,
-    chooseClass,
+    buyGear,
+    sellGearFromPack,
     confirmGoHome,
     enemy,
+    equipFromBag,
     phase,
     player,
     playerNameInput,
@@ -593,7 +725,7 @@ export default function App() {
     goToMenu,
     resetToName,
     runFromBattle,
-    startClass,
+    unequipSlot,
     usePotionAdventure,
   ])
 
@@ -601,6 +733,15 @@ export default function App() {
     return (
       <div className="app-root app-root--fullscreen">
         <div className="rpg-shell rpg-shell--fullscreen rpg-menu-shell">
+          <button
+            type="button"
+            className="rpg-fs-btn"
+            title={browserFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+            aria-label={browserFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+            onClick={toggleBrowserFullscreen}
+          >
+            <IconFullscreen expanded={browserFullscreen} size={20} />
+          </button>
           <h1 className="rpg-menu-title">Frappe Text Adventure RPG</h1>
           <p className="rpg-menu-lead">Step into the woods. Your run is saved in this browser automatically.</p>
           {hasSave && <p className="rpg-menu-save">Found a saved adventurer on this device.</p>}
@@ -623,18 +764,37 @@ export default function App() {
   return (
     <div className="app-root app-root--fullscreen">
       <div className="rpg-shell rpg-shell--fullscreen">
+        <button
+          type="button"
+          className="rpg-fs-btn"
+          title={browserFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+          aria-label={browserFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+          onClick={toggleBrowserFullscreen}
+        >
+          <IconFullscreen expanded={browserFullscreen} size={20} />
+        </button>
         {player && maxStats ? (
           <section className="rpg-panel rpg-dashboard" aria-label="Character">
             <div className="rpg-dashboard-top">
               <h1 className="rpg-dashboard-title">Frappe Text Adventure RPG</h1>
               <div className="rpg-dashboard-identity">
-                <ClassPortrait classKey={player.classKey} size={48} />
+                <AdventurerPortrait size={48} />
                 <div className="rpg-hud-id">
                   <span className="rpg-hud-name">{player.name}</span>
-                  <span className="rpg-hud-class">{player.classLabel}</span>
+                  <span className="rpg-hud-class">Gear defines your kit</span>
                 </div>
               </div>
               <div className="rpg-dashboard-lv-gold">
+                {(phase === 'shop' || phase === 'gear') && (
+                  <button
+                    type="button"
+                    className="rpg-dashboard-back"
+                    title="Return to the world map"
+                    onClick={() => setPhase('adventure')}
+                  >
+                    Back
+                  </button>
+                )}
                 <span className="rpg-hud-badge">
                   Lv <strong>{player.level}</strong>
                 </span>
@@ -664,19 +824,35 @@ export default function App() {
                   MP <strong>{fmt(player.mana)}</strong> / {fmt(maxStats.maxMana)}
                 </span>
               </div>
-              <div className="rpg-statline" style={{ marginTop: '0.35rem' }}>
-                <span>STR {player.stats.strength}</span>
-                <span>AGI {player.stats.agility}</span>
-                <span>INT {player.stats.intelligence}</span>
+              <div
+                className="rpg-statline"
+                style={{ marginTop: '0.35rem' }}
+                title="Innate gifts that award STR/AGI/INT count for gear requirements and are included here."
+              >
+                <span>
+                  STR <strong>{effStats?.strength ?? player.stats.strength}</strong>
+                </span>
+                <span>
+                  AGI <strong>{effStats?.agility ?? player.stats.agility}</strong>
+                </span>
+                <span>
+                  INT <strong>{effStats?.intelligence ?? player.stats.intelligence}</strong>
+                </span>
               </div>
-              <div className="rpg-skill-tier-row">
-                <div className="rpg-skill-tier" title="Skill tiers advance every 3 class levels (I → V).">
-                  Class skills · Tier{' '}
-                  <strong>{['I', 'II', 'III', 'IV', 'V'][getSkillTierIndexForLevel(player.level)]}</strong>
+              {player.innates.length > 0 && (
+                <div className="rpg-innates-row" title="Rolled once at birth; second gift has 0.001% odds.">
+                  Innate{player.innates.length > 1 ? 's' : ''}:{' '}
+                  {player.innates.map((id) => (
+                    <span key={id} className="rpg-innate-pill" title={INNATE_BY_ID[id]?.description ?? id}>
+                      {formatInnateShort(id)}
+                    </span>
+                  ))}
                 </div>
-                <button type="button" className="rpg-skill-tree-trigger" onClick={() => setSkillTreeOpen(true)}>
-                  Skill tree
-                </button>
+              )}
+              <div className="rpg-skill-tier-row">
+                <div className="rpg-skill-tier" title="Attack menu lists one skill per equipped piece; stats unlock heavier gear.">
+                  Combat skills · from equipped gear (see Equipment)
+                </div>
               </div>
               <div className="rpg-upgrades" title="Permanent upgrades">
                 <span>VIT {player.upgrades.vitality}</span>
@@ -686,10 +862,20 @@ export default function App() {
               </div>
               {(player.inventory.healthPotion > 0 ||
                 player.inventory.manaDraught > 0 ||
-                player.inventory.staminaBrew > 0) && (
+                player.inventory.staminaBrew > 0 ||
+                Object.keys(player.salvageLoot).length > 0) && (
                   <div className="rpg-pack">
                     Pack: Red ×{player.inventory.healthPotion} · Blue ×{player.inventory.manaDraught} · Green ×
                     {player.inventory.staminaBrew}
+                    {Object.keys(player.salvageLoot).length > 0 && (
+                      <>
+                        {' '}
+                        · Salvage stacks:{' '}
+                        <strong>
+                          {Object.values(player.salvageLoot).reduce((a, n) => a + n, 0)}
+                        </strong>
+                      </>
+                    )}
                   </div>
                 )}
             </div>
@@ -719,7 +905,8 @@ export default function App() {
           </aside>
 
           <div className="rpg-controls-column">
-            {enemy && battle && phase !== 'adventure' && phase !== 'class' && phase !== 'name' && phase !== 'shop' && (
+            <div className="rpg-controls-scroll">
+            {enemy && battle && phase !== 'adventure' && phase !== 'name' && phase !== 'shop' && (
               <div className="rpg-panel rpg-enemy">
                 <div className="rpg-statline">
                   <span>
@@ -773,7 +960,63 @@ export default function App() {
             {phase === 'shop' && player && (
               <div className="rpg-shop">
                 <h2 className="rpg-shop-heading">Traveling merchant</h2>
-                <p className="rpg-shop-lead">Spend gold on tonics and permanent upgrades. Prices scale per rank.</p>
+                <p className="rpg-shop-lead">
+                  Spend gold on tonics, upgrades, and gear. Battle junk stacks here; armor drops sell at ~40% of list price.
+                </p>
+                {Object.keys(player.salvageLoot).some((id) => (player.salvageLoot[id] ?? 0) > 0) && (
+                  <>
+                    <h3 className="rpg-shop-subheading">Sell junk &amp; salvage</h3>
+                    <p className="rpg-shop-lead rpg-shop-lead--tight">
+                      Mob bits and clutter — one sale per click.
+                    </p>
+                    <ul className="rpg-shop-sell-list">
+                      {Object.entries(player.salvageLoot)
+                        .filter(([, count]) => count > 0)
+                        .map(([sid]) => {
+                          const s = SALVAGE_BY_ID[sid]
+                          if (!s) return null
+                          const n = player.salvageLoot[sid] ?? 0
+                          return (
+                            <li key={`salvage-${sid}`} className="rpg-shop-sell-row">
+                              <span className="rpg-shop-sell-name">
+                                {s.name} ×{n}
+                              </span>
+                              <span className="rpg-shop-sell-meta">
+                                +{s.sellPrice} <IconCoin size={14} /> each
+                              </span>
+                              <button type="button" className="rpg-tiny" onClick={() => sellSalvageStack(sid)}>
+                                Sell 1
+                              </button>
+                            </li>
+                          )
+                        })}
+                    </ul>
+                  </>
+                )}
+                {player.gearOwned.length > 0 && (
+                  <>
+                    <h3 className="rpg-shop-subheading">Sell from pack</h3>
+                    <p className="rpg-shop-lead rpg-shop-lead--tight">Only items in your pack (not worn). Each row sells one copy.</p>
+                    <ul className="rpg-shop-sell-list">
+                      {player.gearOwned.map((gid, idx) => {
+                        const g = GEAR_BY_ID[gid]
+                        if (!g) return null
+                        const buy = merchantBuyPrice(g)
+                        return (
+                          <li key={`sell-${gid}-${idx}`} className="rpg-shop-sell-row">
+                            <span className="rpg-shop-sell-name">{g.name}</span>
+                            <span className="rpg-shop-sell-meta">
+                              {EQUIPMENT_SLOT_LABELS[g.slot]} · +{buy} <IconCoin size={14} />
+                            </span>
+                            <button type="button" className="rpg-tiny" onClick={() => sellGearFromPack(gid)}>
+                              Sell
+                            </button>
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  </>
+                )}
                 <div className="rpg-shop-grid">
                   {SHOP_CONSUMABLES.map((c) => (
                     <div key={c.id} className="rpg-shop-card">
@@ -806,53 +1049,132 @@ export default function App() {
                     )
                   })}
                 </div>
+                <h3 className="rpg-shop-subheading">Arms &amp; armor</h3>
+                <p className="rpg-shop-lead rpg-shop-lead--tight">
+                  Each piece grants one combat skill when worn. Mix slots to shape your kit — main hand and off-hand respect two-handed weapons.
+                </p>
+                <div className="rpg-shop-grid rpg-shop-grid--gear">
+                  {GEAR_CATALOG.map((g) => (
+                    <div key={g.id} className="rpg-shop-card rpg-shop-card--gear">
+                      <div className="rpg-shop-card-body">
+                        <strong>{g.name}</strong>
+                        <span className="rpg-gear-slot-pill">
+                          {EQUIPMENT_SLOT_LABELS[g.slot]}
+                          {g.twoHanded ? ' · Two-handed' : ''}
+                        </span>
+                        <p>{g.description}</p>
+                        <p className="rpg-gear-req-line">Requires: {formatRequirements(g)}</p>
+                        <p className="rpg-gear-skill-line">
+                          Skill: <strong>{g.skill.name}</strong> ({fmt(g.skill.damage)} ·{' '}
+                          {formatSkillResourceDef(g.skill)})
+                        </p>
+                        <button type="button" onClick={() => buyGear(g.id)}>
+                          Buy — {g.price} gold
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {phase === 'gear' && player && (
+              <div className="rpg-gear">
+                <h2 className="rpg-shop-heading">Equipment</h2>
+                <p className="rpg-shop-lead">
+                  Dress each slot — earrings to sabatons. Each worn piece adds its skill to your Attack menu (stat gates apply).
+                </p>
+                {player.equipment.mainHand && GEAR_BY_ID[player.equipment.mainHand]?.twoHanded && (
+                  <p className="rpg-gear-note">Two-handed weapon readied — off-hand is locked until you remove it.</p>
+                )}
+                <div className="rpg-gear-slots">
+                  <div className="rpg-gear-slots-head">
+                    <span>Slot</span>
+                    <span>Worn</span>
+                    <span />
+                  </div>
+                  {COMBAT_GEAR_SLOT_ORDER.map((slot) => {
+                    const id = player.equipment[slot]
+                    const piece = id ? GEAR_BY_ID[id] : null
+                    return (
+                      <div key={slot} className="rpg-gear-slot-row">
+                        <span className="rpg-gear-slot-label">{EQUIPMENT_SLOT_LABELS[slot]}</span>
+                        <span className="rpg-gear-slot-item">
+                          {piece ? (
+                            <>
+                              {piece.name}
+                              <span className="rpg-gear-slot-skill"> · {piece.skill.name}</span>
+                            </>
+                          ) : (
+                            <span className="rpg-gear-slot-empty">Empty</span>
+                          )}
+                        </span>
+                        {piece ? (
+                          <button type="button" className="rpg-tiny" onClick={() => unequipSlot(slot)}>
+                            Stow
+                          </button>
+                        ) : (
+                          <span />
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+                <h3 className="rpg-shop-subheading">In your pack</h3>
+                {player.gearOwned.length === 0 ? (
+                  <p className="rpg-gear-pack-empty">
+                    Nothing here yet — buy gear or wait for drops; junk stacks as salvage (merchant). Sell spares in the shop.
+                  </p>
+                ) : (
+                  <ul className="rpg-gear-pack-list">
+                    {player.gearOwned.map((gid, idx) => {
+                      const g = GEAR_BY_ID[gid]
+                      if (!g) return null
+                      const offBlocked =
+                        g.slot === 'offHand' &&
+                        player.equipment.mainHand &&
+                        GEAR_BY_ID[player.equipment.mainHand]?.twoHanded
+                      const statBlocked = !playerMeetsStatRequirements(player, g)
+                      return (
+                        <li key={`${gid}-${idx}`} className="rpg-gear-pack-row">
+                          <div className="rpg-gear-pack-main">
+                            <strong>{g.name}</strong>
+                            <span className="rpg-gear-slot-pill">
+                              {EQUIPMENT_SLOT_LABELS[g.slot]}
+                              {g.twoHanded ? ' · 2H' : ''}
+                            </span>
+                          </div>
+                          <span className="rpg-gear-pack-skill">{g.skill.name}</span>
+                          <button
+                            type="button"
+                            className="rpg-tiny"
+                            disabled={!!offBlocked || statBlocked}
+                            title={
+                              offBlocked
+                                ? 'Two-handed weapon uses both hands'
+                                : statBlocked
+                                  ? `Requires ${formatRequirements(g)}`
+                                  : 'Wear this piece'
+                            }
+                            onClick={() => equipFromBag(gid)}
+                          >
+                            Equip
+                          </button>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                )}
               </div>
             )}
 
             <div className="rpg-controls-body">{actions}</div>
+            </div>
           </div>
         </div>
 
         <p className="rpg-meta">Browser RPG — progression auto-saves while you play.</p>
       </div>
-
-      {player && skillTreeOpen && (
-        <div
-          className="rpg-modal-overlay"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="rpg-skill-tree-dialog-title"
-          onClick={() => setSkillTreeOpen(false)}
-        >
-          <div className="rpg-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="rpg-modal-head">
-              <h2 id="rpg-skill-tree-dialog-title" className="rpg-modal-title">
-                Skill tree — {player.classLabel}
-              </h2>
-              <button
-                type="button"
-                className="rpg-modal-close"
-                onClick={() => setSkillTreeOpen(false)}
-                aria-label="Close skill tree"
-              >
-                ×
-              </button>
-            </div>
-            <p className="rpg-modal-lead">
-              Three branches per tier. You wield the tier that matches your level; lower tiers are mastered, higher ones
-              locked.
-            </p>
-            <div className="rpg-modal-body">
-              <SkillTreePanel player={player} compact />
-            </div>
-            <div className="rpg-modal-foot">
-              <button type="button" className="rpg-modal-done" onClick={() => setSkillTreeOpen(false)}>
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

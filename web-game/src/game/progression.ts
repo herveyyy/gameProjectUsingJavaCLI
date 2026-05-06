@@ -1,12 +1,13 @@
 import {
-  CLASSES,
+  ADVENTURER_BASE,
   SHOP_CONSUMABLES,
   SHOP_UPGRADES,
-  getSkillTierIndexForLevel,
-  getSkillsForLevel,
   upgradePrice,
   xpRequiredForNextLevel,
 } from './constants'
+import { GEAR_BY_ID, merchantBuyPrice } from './gear'
+import { SALVAGE_BY_ID } from './salvage'
+import { applyInnateDamageBonuses } from './innates'
 import type { PlayerState, ShopConsumableId, ShopUpgradeId, SkillDef } from './types'
 
 export interface MaxStats {
@@ -16,7 +17,7 @@ export interface MaxStats {
 }
 
 export function getMaxStats(player: PlayerState): MaxStats {
-  const def = CLASSES[player.classKey]
+  const def = ADVENTURER_BASE
   const L = player.level
   const u = player.upgrades
   const hpFromLevel = (L - 1) * 6
@@ -29,23 +30,34 @@ export function getMaxStats(player: PlayerState): MaxStats {
   }
 }
 
-/** Striking upgrade + light level scaling (skill tiers carry most growth). */
+/** Striking upgrade + light level scaling + innate flat/% damage gifts. */
 export function getEffectiveSkillDamage(player: PlayerState, skill: SkillDef): number {
   const levelMul = 1 + (player.level - 1) * 0.022
-  const raw = skill.damage * levelMul + player.upgrades.striking
+  let raw = skill.damage * levelMul + player.upgrades.striking
+  raw = applyInnateDamageBonuses(player, raw)
   return Math.max(0, Math.floor(raw))
-}
-
-export function syncClassSkills(player: PlayerState): PlayerState {
-  return {
-    ...player,
-    skills: getSkillsForLevel(player.classKey, player.level),
-  }
 }
 
 export function getEffectiveManaCost(player: PlayerState, skill: SkillDef): number {
   const reduc = Math.min(0.35, player.level * 0.01 + player.upgrades.arcana * 0.02)
   return Math.max(0, skill.manaCost * (1 - reduc))
+}
+
+/** Same scaling pattern as mana, keyed off Endurance upgrades. */
+export function getEffectiveStaminaCost(player: PlayerState, skill: SkillDef): number {
+  const base = skill.staminaCost ?? 0
+  const reduc = Math.min(0.35, player.level * 0.01 + player.upgrades.endurance * 0.02)
+  return Math.max(0, base * (1 - reduc))
+}
+
+/** Shop / codex: printed resource line before battle reductions. */
+export function formatSkillResourceDef(skill: SkillDef): string {
+  const mp = skill.manaCost
+  const st = skill.staminaCost ?? 0
+  const parts: string[] = []
+  if (mp > 0) parts.push(`${mp} MP`)
+  if (st > 0) parts.push(`${st} STA`)
+  return parts.length ? parts.join(' · ') : 'Free'
 }
 
 export function clampResource(current: number, max: number): number {
@@ -75,7 +87,6 @@ export function addXp(player: PlayerState, amount: number): LevelUpResult {
   let levelsGained = 0
 
   while (p.xp >= p.xpToNext) {
-    const tierBefore = getSkillTierIndexForLevel(p.level)
     p.xp -= p.xpToNext
     const newLevel = p.level + 1
     p = {
@@ -89,17 +100,11 @@ export function addXp(player: PlayerState, amount: number): LevelUpResult {
       xpToNext: xpRequiredForNextLevel(newLevel),
     }
     levelsGained += 1
-    messages.push(`LEVEL UP! You are now level ${newLevel}. Stats +1 all.`)
-    const tierAfter = getSkillTierIndexForLevel(newLevel)
-    if (tierAfter > tierBefore) {
-      const roman = ['I', 'II', 'III', 'IV', 'V'][tierAfter]
-      messages.push(`Skill tier ${roman} — new techniques for your ${p.classLabel}.`)
-    }
+    messages.push(`LEVEL UP! You are now level ${newLevel}. STR / AGI / INT +1 each — new gear may unlock.`)
     const max = getMaxStats(p)
     p = { ...p, hp: max.maxHp, stamina: max.maxStamina, mana: max.maxMana }
   }
 
-  p = syncClassSkills(p)
   return { player: applyMaxCaps(p), levelsGained, messages }
 }
 
@@ -110,6 +115,57 @@ export function tryBuyConsumable(player: PlayerState, id: ShopConsumableId): Pla
     ...player,
     gold: player.gold - def.price,
     inventory: { ...player.inventory, [id]: player.inventory[id] + 1 },
+  }
+}
+
+export function tryBuyGear(player: PlayerState, gearId: string): PlayerState | null {
+  const def = GEAR_BY_ID[gearId]
+  if (!def || player.gold < def.price) return null
+  return applyMaxCaps({
+    ...player,
+    gold: player.gold - def.price,
+    gearOwned: [...player.gearOwned, gearId],
+  })
+}
+
+function removeOneGearCopy(owned: readonly string[], itemId: string): string[] | null {
+  const i = owned.indexOf(itemId)
+  if (i === -1) return null
+  return [...owned.slice(0, i), ...owned.slice(i + 1)]
+}
+
+/** Sell one copy from pack only (not worn gear). Returns gold gained. */
+export function trySellSalvageStack(
+  player: PlayerState,
+  salvageId: string,
+): { player: PlayerState; goldGained: number } | null {
+  const def = SALVAGE_BY_ID[salvageId]
+  if (!def) return null
+  const n = player.salvageLoot[salvageId] ?? 0
+  if (n < 1) return null
+  const nextLoot = { ...player.salvageLoot }
+  if (n <= 1) delete nextLoot[salvageId]
+  else nextLoot[salvageId] = n - 1
+  const goldGained = def.sellPrice
+  return {
+    player: applyMaxCaps({ ...player, gold: player.gold + goldGained, salvageLoot: nextLoot }),
+    goldGained,
+  }
+}
+
+export function trySellGearFromBag(player: PlayerState, gearId: string): { player: PlayerState; goldGained: number } | null {
+  const def = GEAR_BY_ID[gearId]
+  if (!def) return null
+  const bag = removeOneGearCopy(player.gearOwned, gearId)
+  if (!bag) return null
+  const goldGained = merchantBuyPrice(def)
+  return {
+    player: applyMaxCaps({
+      ...player,
+      gold: player.gold + goldGained,
+      gearOwned: bag,
+    }),
+    goldGained,
   }
 }
 

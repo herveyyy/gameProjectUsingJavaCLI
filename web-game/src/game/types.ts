@@ -1,9 +1,10 @@
-export type ClassKey = 'warrior' | 'rogue' | 'mage' | 'ranger'
-
 export interface SkillDef {
   name: string
   damage: number
+  /** MP spent when greater than zero. */
   manaCost: number
+  /** STA spent when greater than zero — stamina-only skills use this with `manaCost: 0`. */
+  staminaCost?: number
 }
 
 export interface PlayerUpgrades {
@@ -19,10 +20,55 @@ export interface PlayerInventory {
   staminaBrew: number
 }
 
+export type EquipmentSlotId =
+  | 'head'
+  | 'ears'
+  | 'neck'
+  | 'body'
+  | 'hands'
+  | 'back'
+  | 'legs'
+  | 'feet'
+  | 'mainHand'
+  | 'offHand'
+
+export interface PlayerEquipment {
+  head: string | null
+  ears: string | null
+  neck: string | null
+  body: string | null
+  hands: string | null
+  back: string | null
+  legs: string | null
+  feet: string | null
+  mainHand: string | null
+  offHand: string | null
+}
+
+/** Minimum stats to equip; omit a key when there is no requirement for that stat. */
+export interface StatRequirements {
+  strength?: number
+  agility?: number
+  intelligence?: number
+}
+
+/** Static definition — sold in shop; each piece carries one combat skill. */
+export interface GearItemDef {
+  id: string
+  name: string
+  slot: EquipmentSlotId
+  description: string
+  price: number
+  skill: SkillDef
+  requirements?: StatRequirements
+  /** Occupies main + off hand; off-hand piece is unequipped when set. */
+  twoHanded?: boolean
+}
+
 export interface PlayerState {
   name: string
-  classKey: ClassKey
-  classLabel: string
+  /** Rolled at creation — usually one innate id; ~0.001% roll grants two. */
+  innates: string[]
   hp: number
   stamina: number
   mana: number
@@ -31,9 +77,13 @@ export interface PlayerState {
   xp: number
   xpToNext: number
   stats: { strength: number; agility: number; intelligence: number }
-  skills: SkillDef[]
   upgrades: PlayerUpgrades
   inventory: PlayerInventory
+  /** Item ids in the bag (multiset — duplicates allowed). */
+  gearOwned: string[]
+  equipment: PlayerEquipment
+  /** Stackable mob salvage — sell-only at the merchant (item id → count). */
+  salvageLoot: Record<string, number>
 }
 
 export interface EnemyState {
@@ -54,9 +104,9 @@ export interface BattleState {
 
 export type Phase =
   | 'name'
-  | 'class'
   | 'adventure'
   | 'shop'
+  | 'gear'
   | 'battle_menu'
   | 'pick_skill'
   | 'use_item_battle'
