@@ -9,11 +9,22 @@ import type {
   PlayerUpgrades,
 } from './types'
 
-export const STORAGE_KEY = 'Wela-rpg-save-v1'
+/** Legacy single-save key — migrated into slot 0 when present. */
+export const LEGACY_STORAGE_KEY = 'Wela-rpg-save-v1'
+
+export const STORAGE_KEY = 'Wela-rpg-save-v2'
+
+/** Number of independent character saves in localStorage. */
+export const SAVE_SLOT_COUNT = 3
 
 export interface SavePayload {
   version: 1
   player: PlayerState
+}
+
+export interface SavePayloadV2 {
+  version: 2
+  slots: (PlayerState | null)[]
 }
 
 function isInventory(x: unknown): x is PlayerInventory {
@@ -115,39 +126,111 @@ function isValidPlayer(p: unknown): p is PlayerState {
   return true
 }
 
-export function loadProgress(): PlayerState | null {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return null
-    const data = JSON.parse(raw) as unknown
-    if (!data || typeof data !== 'object') return null
-    const rec = data as Record<string, unknown>
-    if (rec.version !== 1) return null
-    const migrated = migratePlayerShape(rec.player)
-    if (!isValidPlayer(migrated)) return null
-    return applyMaxCaps(migrated as PlayerState)
-  } catch {
-    return null
-  }
+function emptySlots(): (PlayerState | null)[] {
+  return Array.from({ length: SAVE_SLOT_COUNT }, () => null)
 }
 
-export function saveProgress(player: PlayerState): void {
+function normalizeSlots(raw: unknown): (PlayerState | null)[] {
+  const base = emptySlots()
+  if (!Array.isArray(raw)) return base
+  for (let i = 0; i < SAVE_SLOT_COUNT && i < raw.length; i++) {
+    const cell = raw[i]
+    if (cell === null || cell === undefined) {
+      base[i] = null
+      continue
+    }
+    const migrated = migratePlayerShape(cell)
+    if (!isValidPlayer(migrated)) {
+      base[i] = null
+      continue
+    }
+    base[i] = applyMaxCaps(migrated as PlayerState)
+  }
+  return base
+}
+
+function readSlotsFromStorage(): (PlayerState | null)[] {
   try {
-    const payload: SavePayload = { version: 1, player: JSON.parse(JSON.stringify(player)) as PlayerState }
+    const v2raw = localStorage.getItem(STORAGE_KEY)
+    if (v2raw) {
+      const data = JSON.parse(v2raw) as unknown
+      if (data && typeof data === 'object') {
+        const rec = data as Record<string, unknown>
+        if (rec.version === 2 && Array.isArray(rec.slots)) {
+          return normalizeSlots(rec.slots)
+        }
+      }
+    }
+
+    const legacyRaw = localStorage.getItem(LEGACY_STORAGE_KEY)
+    if (legacyRaw) {
+      const data = JSON.parse(legacyRaw) as unknown
+      if (data && typeof data === 'object') {
+        const rec = data as Record<string, unknown>
+        if (rec.version === 1) {
+          const migrated = migratePlayerShape(rec.player)
+          if (isValidPlayer(migrated)) {
+            const slots = normalizeSlots([applyMaxCaps(migrated as PlayerState)])
+            writeSlotsInternal(slots)
+            try {
+              localStorage.removeItem(LEGACY_STORAGE_KEY)
+            } catch {
+              /* ignore */
+            }
+            return slots
+          }
+        }
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return emptySlots()
+}
+
+function writeSlotsInternal(slots: (PlayerState | null)[]): void {
+  const payload: SavePayloadV2 = { version: 2, slots: [...slots] }
+  try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
   } catch {
     /* quota / private mode */
   }
 }
 
-export function clearProgress(): void {
-  try {
-    localStorage.removeItem(STORAGE_KEY)
-  } catch {
-    /* ignore */
+/** Summaries for the main menu (one row per save slot). */
+export function listSlotSummaries(): { index: number; player: PlayerState | null }[] {
+  const slots = readSlotsFromStorage()
+  return slots.map((player, index) => ({ index, player }))
+}
+
+/** First slot with a valid save — used to warm caches after splash. */
+export function getAnySavedPlayer(): PlayerState | null {
+  for (const p of readSlotsFromStorage()) {
+    if (p) return p
   }
+  return null
+}
+
+export function loadProgress(slotIndex: number): PlayerState | null {
+  if (slotIndex < 0 || slotIndex >= SAVE_SLOT_COUNT) return null
+  const slots = readSlotsFromStorage()
+  return slots[slotIndex] ?? null
+}
+
+export function saveProgress(slotIndex: number, player: PlayerState): void {
+  if (slotIndex < 0 || slotIndex >= SAVE_SLOT_COUNT) return
+  const slots = readSlotsFromStorage()
+  slots[slotIndex] = JSON.parse(JSON.stringify(player)) as PlayerState
+  writeSlotsInternal(slots)
+}
+
+export function clearProgress(slotIndex: number): void {
+  if (slotIndex < 0 || slotIndex >= SAVE_SLOT_COUNT) return
+  const slots = readSlotsFromStorage()
+  slots[slotIndex] = null
+  writeSlotsInternal(slots)
 }
 
 export function hasSavedGame(): boolean {
-  return loadProgress() !== null
+  return readSlotsFromStorage().some(Boolean)
 }

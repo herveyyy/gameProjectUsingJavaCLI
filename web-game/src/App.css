@@ -1652,6 +1652,110 @@ button.rpg-dashboard-back:hover {
   text-align: center;
 }
 
+.rpg-menu-slots {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: 100%;
+  max-width: min(420px, 100%);
+  margin: 0 auto 0.75rem;
+  text-align: left;
+}
+
+.rpg-menu-slot {
+  padding: 0.75rem 0.85rem;
+  border: 3px solid var(--ink);
+  border-radius: 10px;
+  background: var(--paper);
+  box-shadow: 4px 4px 0 var(--ink);
+}
+
+.rpg-menu-slot--filled {
+  background: linear-gradient(145deg, #fffef8 0%, #ecfccb 100%);
+}
+
+.rpg-menu-slot--empty {
+  background: var(--paper);
+  opacity: 0.95;
+}
+
+.rpg-menu-slot-head {
+  margin-bottom: 0.35rem;
+}
+
+.rpg-menu-slot-label {
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.rpg-menu-slot-summary {
+  margin: 0 0 0.55rem;
+  font-size: 0.88rem;
+  line-height: 1.35;
+}
+
+.rpg-menu-slot-meta {
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.rpg-menu-slot-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.rpg-menu-slot-actions--single {
+  margin-top: 0.15rem;
+}
+
+.rpg-menu-slot-actions button {
+  width: 100%;
+  padding: 0.55rem 0.75rem;
+  border-radius: 8px;
+  border: 3px solid var(--ink);
+  font-size: 0.88rem;
+  font-weight: 900;
+  cursor: pointer;
+  box-shadow: 4px 4px 0 var(--ink);
+  transition: transform 0.08s ease, box-shadow 0.08s ease;
+}
+
+.rpg-menu-slot-actions .rpg-menu-play {
+  background: var(--lime);
+  color: var(--ink);
+}
+
+.rpg-menu-slot-actions .rpg-menu-secondary {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.rpg-menu-slot-actions .rpg-menu-secondary:hover {
+  background: var(--pink);
+}
+
+.rpg-menu-delete {
+  background: var(--coral);
+  color: var(--ink);
+}
+
+.rpg-menu-delete:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 5px 5px 0 var(--ink);
+}
+
+.rpg-menu-slot-actions button:disabled {
+  opacity: 0.55;
+  cursor: wait;
+  transform: none;
+  pointer-events: none;
+  box-shadow: 4px 4px 0 var(--ink);
+}
+
 .rpg-menu-actions {
   display: flex;
   flex-direction: column;

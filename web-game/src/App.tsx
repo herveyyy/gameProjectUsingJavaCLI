@@ -45,7 +45,14 @@ import {
 } from './game/progression'
 import { rollBattleLoot } from './game/loot'
 import { SALVAGE_BY_ID, addSalvageStacks, rollSalvageLoot } from './game/salvage'
-import { clearProgress, hasSavedGame, loadProgress, saveProgress } from './game/storage'
+import {
+  clearProgress,
+  getAnySavedPlayer,
+  hasSavedGame,
+  listSlotSummaries,
+  loadProgress,
+  saveProgress,
+} from './game/storage'
 import { warmGameCaches } from './game/warmup'
 import type {
   BattleState,
@@ -95,6 +102,8 @@ export default function App() {
   const [shopStockFilter, setShopStockFilter] = useState<ShopStockFilter>('all')
   const [shopSearchQuery, setShopSearchQuery] = useState('')
   const [gameBooting, setGameBooting] = useState(false)
+  /** Which save slot (0-based) is active while playing; null on main menu. */
+  const [saveSlotIndex, setSaveSlotIndex] = useState<number | null>(null)
 
   const appendLog = useCallback((line: string) => {
     setLogLines((prev) => [...prev, line])
@@ -104,11 +113,11 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    if (screen === 'game' && player) {
-      saveProgress(player)
+    if (screen === 'game' && player && saveSlotIndex !== null) {
+      saveProgress(saveSlotIndex, player)
       setHasSave(true)
     }
-  }, [player, screen])
+  }, [player, screen, saveSlotIndex])
 
   useEffect(() => {
     const sync = () => setBrowserFullscreen(!!document.fullscreenElement)
@@ -129,7 +138,7 @@ export default function App() {
     if (splashPhase !== 'gone') return
     let idle: ReturnType<typeof requestIdleCallback> | undefined
     let timer: number | undefined
-    const run = () => warmGameCaches(loadProgress())
+    const run = () => warmGameCaches(getAnySavedPlayer())
     if (typeof requestIdleCallback !== 'undefined') {
       idle = requestIdleCallback(run, { timeout: 3200 })
     } else {
@@ -157,15 +166,15 @@ export default function App() {
   }, [])
 
   const resetToName = useCallback(() => {
-    clearProgress()
-    setHasSave(false)
+    if (saveSlotIndex !== null) clearProgress(saveSlotIndex)
+    setHasSave(hasSavedGame())
     setPhase('name')
     setPlayerNameInput('')
     setPlayer(null)
     setEnemy(null)
     setBattle(null)
     setLogLines(["Unknown Entity: What's your name, human?"])
-  }, [])
+  }, [saveSlotIndex])
 
   const goToMenu = useCallback(() => {
     setEnemy(null)
@@ -174,23 +183,25 @@ export default function App() {
     setPhase('name')
     setPlayerNameInput('')
     setLogLines([])
+    setSaveSlotIndex(null)
     setScreen('menu')
     setHasSave(hasSavedGame())
   }, [])
 
   const exitToMenu = useCallback(() => {
-    if (player) saveProgress(player)
+    if (player && saveSlotIndex !== null) saveProgress(saveSlotIndex, player)
     setHasSave(hasSavedGame())
     goToMenu()
-  }, [goToMenu, player])
+  }, [goToMenu, player, saveSlotIndex])
 
-  const handlePlay = useCallback(() => {
+  const handleContinueSlot = useCallback((slotIndex: number) => {
     flushSync(() => setGameBooting(true))
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        const saved = loadProgress()
+        const saved = loadProgress(slotIndex)
         warmGameCaches(saved)
         flushSync(() => {
+          setSaveSlotIndex(slotIndex)
           setScreen('game')
           if (saved) {
             setPlayer(saved)
@@ -200,7 +211,7 @@ export default function App() {
             setBattle(null)
             setLogLines([
               `Welcome back, ${saved.name}!`,
-              'Saved progress loaded from this browser.',
+              `Loaded save slot ${slotIndex + 1} from this browser.`,
               'Choose a destination — each region shows recommended levels.',
             ])
           } else {
@@ -217,14 +228,22 @@ export default function App() {
     })
   }, [])
 
-  const handleNewGame = useCallback(() => {
+  const handleNewCharacterSlot = useCallback((slotIndex: number) => {
+    const occupied = loadProgress(slotIndex)
+    if (occupied) {
+      const ok = window.confirm(
+        `Replace the save in slot ${slotIndex + 1} (${occupied.name}, level ${occupied.level})? This cannot be undone.`,
+      )
+      if (!ok) return
+    }
     flushSync(() => setGameBooting(true))
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        clearProgress()
+        clearProgress(slotIndex)
         warmGameCaches(null)
         flushSync(() => {
-          setHasSave(false)
+          setSaveSlotIndex(slotIndex)
+          setHasSave(hasSavedGame())
           setScreen('game')
           setPlayer(null)
           setPlayerNameInput('')
@@ -236,6 +255,15 @@ export default function App() {
         })
       })
     })
+  }, [])
+
+  const handleDeleteSlot = useCallback((slotIndex: number) => {
+    const p = loadProgress(slotIndex)
+    if (!p) return
+    const ok = window.confirm(`Delete ${p.name} (level ${p.level}) from this device?`)
+    if (!ok) return
+    clearProgress(slotIndex)
+    setHasSave(hasSavedGame())
   }, [])
 
   const beginAdventure = useCallback(() => {
@@ -390,8 +418,8 @@ export default function App() {
 
       if (b.playerHp <= 0) {
         appendLog('You died.')
-        clearProgress()
-        setHasSave(false)
+        if (saveSlotIndex !== null) clearProgress(saveSlotIndex)
+        setHasSave(hasSavedGame())
         setBattle(null)
         setEnemy(null)
         setPhase('done')
@@ -403,7 +431,7 @@ export default function App() {
       setBattle(b)
       setPhase('battle_menu')
     },
-    [appendLog, battle, enemy, player],
+    [appendLog, battle, enemy, player, saveSlotIndex],
   )
 
   const buyConsumable = useCallback(
@@ -890,24 +918,71 @@ export default function App() {
               <IconFullscreen expanded={browserFullscreen} size={20} />
             </button>
             <h1 className="rpg-menu-title">Frappe Text Adventure RPG</h1>
-            <p className="rpg-menu-lead">Step into the Wela. Your run is saved in this browser automatically.</p>
-            {hasSave && <p className="rpg-menu-save">Found a saved adventurer on this device.</p>}
-            <div className="rpg-menu-actions">
-              <button type="button" className="rpg-menu-play" onClick={handlePlay} disabled={gameBooting}>
-                Play
-              </button>
-              {hasSave && (
-                <button
-                  type="button"
-                  className="rpg-menu-secondary"
-                  onClick={handleNewGame}
-                  disabled={gameBooting}
+            <p className="rpg-menu-lead">
+              Pick a save slot — each adventurer keeps their own progress in this browser.
+            </p>
+            {hasSave && <p className="rpg-menu-save">You have one or more heroes saved on this device.</p>}
+            <div className="rpg-menu-slots" aria-label="Character save slots">
+              {listSlotSummaries().map(({ index, player: slotPlayer }) => (
+                <div
+                  key={index}
+                  className={`rpg-menu-slot${slotPlayer ? ' rpg-menu-slot--filled' : ' rpg-menu-slot--empty'}`}
                 >
-                  New game
-                </button>
-              )}
+                  <div className="rpg-menu-slot-head">
+                    <span className="rpg-menu-slot-label">Adventurer {index + 1}</span>
+                  </div>
+                  {slotPlayer ? (
+                    <>
+                      <p className="rpg-menu-slot-summary">
+                        <strong>{slotPlayer.name}</strong>
+                        <span className="rpg-menu-slot-meta">
+                          {' '}
+                          · Level {slotPlayer.level} · {slotPlayer.gold} gold
+                        </span>
+                      </p>
+                      <div className="rpg-menu-slot-actions">
+                        <button
+                          type="button"
+                          className="rpg-menu-play"
+                          onClick={() => handleContinueSlot(index)}
+                          disabled={gameBooting}
+                        >
+                          Continue
+                        </button>
+                        <button
+                          type="button"
+                          className="rpg-menu-secondary"
+                          onClick={() => handleNewCharacterSlot(index)}
+                          disabled={gameBooting}
+                        >
+                          New character
+                        </button>
+                        <button
+                          type="button"
+                          className="rpg-menu-delete"
+                          onClick={() => handleDeleteSlot(index)}
+                          disabled={gameBooting}
+                        >
+                          Delete save
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="rpg-menu-slot-actions rpg-menu-slot-actions--single">
+                      <button
+                        type="button"
+                        className="rpg-menu-play"
+                        onClick={() => handleNewCharacterSlot(index)}
+                        disabled={gameBooting}
+                      >
+                        New character
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
-            <p className="rpg-meta">Uses localStorage — clearing site data removes your save.</p>
+            <p className="rpg-meta">Uses localStorage — clearing site data removes saves.</p>
           </div>
         </div>
       </>
@@ -936,12 +1011,14 @@ export default function App() {
               aria-label="Character"
             >
               <div className="rpg-dashboard-top">
-                <h1 className="rpg-dashboard-title">Frappe Text Adventure RPG</h1>
                 <div className="rpg-dashboard-identity">
                   <AdventurerPortrait size={48} />
                   <div className="rpg-hud-id">
                     <span className="rpg-hud-name">{player.name}</span>
-                    <span className="rpg-hud-class">Gear defines your kit</span>
+                    <span className="rpg-hud-class">
+                      {saveSlotIndex !== null ? `Save slot ${saveSlotIndex + 1} · ` : ''}
+                      Gear defines your kit
+                    </span>
                   </div>
                 </div>
                 <div className="rpg-dashboard-lv-gold">
@@ -1050,7 +1127,10 @@ export default function App() {
 
           {!player && phase === 'name' && (
             <div className="rpg-panel rpg-player">
-              <div>Enter your name to begin.</div>
+              <div>
+                Enter your name to begin
+                {saveSlotIndex !== null ? ` (save slot ${saveSlotIndex + 1}).` : '.'}
+              </div>
             </div>
           )}
 
@@ -1064,7 +1144,7 @@ export default function App() {
               </div>
             </aside>
 
-              <div className="rpg-controls-column rpg-controls-column--immersive">
+            <div className="rpg-controls-column rpg-controls-column--immersive">
               <div className="rpg-controls-scroll">
                 {enemy && battle && phase !== 'adventure' && phase !== 'name' && phase !== 'shop' && (
                   <div className="rpg-panel rpg-enemy">
