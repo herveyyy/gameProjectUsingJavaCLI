@@ -44,7 +44,18 @@ export function AdventurerPortrait({ size = 56 }: { size?: number }) {
   )
 }
 
-type ShopVisual = 'potion' | 'vial' | 'leaf' | 'heart' | 'sword' | 'spark' | 'wind' | 'book'
+type ShopVisual =
+  | 'potion'
+  | 'vial'
+  | 'leaf'
+  | 'scroll'
+  | 'shield'
+  | 'star'
+  | 'heart'
+  | 'sword'
+  | 'spark'
+  | 'wind'
+  | 'book'
 
 export function ShopIcon({ kind, size = 28 }: { kind: ShopVisual; size?: number }) {
   const w = size
@@ -67,6 +78,43 @@ export function ShopIcon({ kind, size = 28 }: { kind: ShopVisual; size?: number 
       return (
         <svg width={w} height={h} viewBox="0 0 24 24" aria-hidden>
           <path d="M4 16 C14 4 22 20 12 20 C8 20 4 18 4 16z" fill="#86efac" stroke={ink} strokeWidth="2" />
+        </svg>
+      )
+    case 'scroll':
+      return (
+        <svg width={w} height={h} viewBox="0 0 24 24" aria-hidden>
+          <path
+            d="M8 3h8l4 4v14a2 2 0 01-2 2H8a2 2 0 01-2-2V5a2 2 0 012-2z"
+            fill="#fef9c3"
+            stroke={ink}
+            strokeWidth="2"
+          />
+          <path d="M8 7h8M8 11h6M8 15h7" stroke={ink} strokeWidth="1.5" strokeLinecap="round" />
+        </svg>
+      )
+    case 'shield':
+      return (
+        <svg width={w} height={h} viewBox="0 0 24 24" aria-hidden>
+          <path
+            d="M12 3l8 3v7c0 5-3.5 9.5-8 11-4.5-1.5-8-6-8-11V6z"
+            fill="#bae6fd"
+            stroke={ink}
+            strokeWidth="2"
+            strokeLinejoin="round"
+          />
+          <path d="M12 8v6M9 11h6" stroke={ink} strokeWidth="2" strokeLinecap="round" />
+        </svg>
+      )
+    case 'star':
+      return (
+        <svg width={w} height={h} viewBox="0 0 24 24" aria-hidden>
+          <path
+            d="M12 2l2.2 6.8h7l-5.7 4.1 2.2 6.8L12 15.6 6.3 19.7l2.2-6.8L2.8 8.8h7z"
+            fill="#fde047"
+            stroke={ink}
+            strokeWidth="1.5"
+            strokeLinejoin="round"
+          />
         </svg>
       )
     case 'heart':

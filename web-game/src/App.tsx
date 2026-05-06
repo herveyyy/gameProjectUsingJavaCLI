@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import './App.css'
+import './theme-silk.css'
+import './theme-grimoire.css'
 import { AdventurerPortrait, IconCoin, IconFullscreen, IconXpSpark, ShopIcon } from './components/GameIcons'
 import {
   COMBAT_GEAR_SLOT_ORDER,
@@ -9,6 +11,7 @@ import {
   GEAR_ARCHETYPE_LABELS,
   GEAR_ARCHETYPE_ORDER,
   formatDurabilityLine,
+  formatMitigationSummary,
   formatRequirements,
   GEAR_BY_ID,
   GEAR_CATALOG,
@@ -38,7 +41,16 @@ import {
   statTomePrice,
   upgradePrice,
 } from './game/constants'
-import { enemyAttackHits, formatInnateShort, getEffectiveStats, INNATE_BY_ID } from './game/innates'
+import {
+  aggregateLifeStealPercent,
+  aggregateSanctuaryTakenMul,
+  aggregateThornReflectPercent,
+  applySurgeToOutgoingDamage,
+  enemyAttackHits,
+  formatInnateShort,
+  getEffectiveStats,
+  INNATE_BY_ID,
+} from './game/innates'
 import {
   addXp,
   applyMaxCaps,
@@ -51,18 +63,32 @@ import {
   tryBuyGear,
   tryBuyStatTome,
   tryBuyUpgrade,
+  tryConsumeCleanseScroll,
+  tryConsumeImmuneElixir,
+  tryConsumeImmunePhilter,
+  tryConsumeMightDraught,
+  tryConsumePrismaticDraught,
+  tryConsumeApexMightDraught,
+  tryConsumeVeilPhilter,
+  tryConsumeChampionCordial,
   tryRepairEquippedSlot,
   tryRepairGearInBag,
   trySellGearFromBag,
   trySellSalvageStack,
+  getHealthPotionHeal,
+  getManaDraughtRestore,
+  getStaminaBrewRestore,
+  getSunriseCordialRestore,
   tryUseHealthPotion,
   tryUseManaDraught,
   tryUseStaminaBrew,
+  tryUseSunriseCordial,
 } from './game/progression'
 import { rollBattleLoot, rollBossExclusiveGear } from './game/loot'
 import { SALVAGE_BY_ID, addSalvageStacks, rollSalvageLoot } from './game/salvage'
 import {
   absorbDamageWithShield,
+  cleanseAllStatuses,
   consumeEmpoweredBonus,
   consumeStunSkip,
   formatStatusLine,
@@ -79,7 +105,17 @@ import {
   loadProgress,
   saveProgress,
 } from './game/storage'
+import {
+  defaultSkillDamageKind,
+  describeOutgoingAffinity,
+  enemyTakenMultiplier,
+  filterStunApplies,
+  resolveIncomingDamageFromEnemy,
+} from './game/combatMitigation'
+import { filterIncomingPlayerApplies } from './game/incomingStatuses'
+import { formatEquippedFacetRuntimeSummary, tryConsumeReviveFacet } from './game/facets'
 import { warmGameCaches } from './game/warmup'
+import { journalLineModifier } from './utils/journalLineClass'
 import { PVP_HP_LOSS_THRESHOLD } from './game/pvpResolve'
 import {
   applyStrikeFromSnapshot,
@@ -89,6 +125,7 @@ import {
   pvpOutcomeForRole,
   resolveContestToStrike,
 } from './multiplayer/pvpCombatState'
+import { computePvpGoldDelta } from './multiplayer/pvpSettlement'
 import type { PvpCombatSnapshot, PvpLastContest } from './multiplayer/pvpProtocol'
 import type { RpsChoice } from './multiplayer/pvpRps'
 import { RPS_LABELS } from './multiplayer/pvpRps'
@@ -105,8 +142,16 @@ import type {
   ShopStatTomeId,
   ShopUpgradeId,
 } from './game/types'
+import {
+  THEME_IDS,
+  applyThemeToDocument,
+  readStoredTheme,
+  themeShortLabel,
+  writeStoredTheme,
+  type ThemeId,
+} from './theme'
 
-type Screen = 'menu' | 'game'
+type Screen = 'menu' | 'game' | 'settings'
 
 type ShopStockFilter = 'all' | 'consumables' | 'upgrades' | 'stat_tomes' | EquipmentSlotId | GearArchetypeId
 
@@ -141,8 +186,51 @@ function pvpRpsEmoji(c: RpsChoice) {
   return c === 'rock' ? '✊' : c === 'paper' ? '✋' : '✌️'
 }
 
+function ThemeSettings({
+  themeId,
+  onChange,
+  variant = 'default',
+}: {
+  themeId: ThemeId
+  onChange: (id: ThemeId) => void
+  variant?: 'default' | 'ios'
+}) {
+  const isIos = variant === 'ios'
+  const legendId = isIos ? 'rpg-theme-legend-ios' : 'rpg-theme-legend'
+  return (
+    <div
+      className={isIos ? 'rpg-ios-appearance' : 'rpg-theme-settings'}
+      role="group"
+      aria-labelledby={legendId}
+    >
+      <span id={legendId} className={isIos ? 'rpg-ios-appearance__label' : 'rpg-theme-settings__legend'}>
+        {isIos ? 'Interface style' : 'Theme'}
+      </span>
+      <div className={isIos ? 'rpg-ios-segment rpg-ios-segment--triple' : 'rpg-theme-settings__options'}>
+        {THEME_IDS.map((id) => (
+          <button
+            key={id}
+            type="button"
+            className={
+              isIos
+                ? `rpg-ios-segment__btn${themeId === id ? ' rpg-ios-segment__btn--pressed' : ''}`
+                : `rpg-theme-option${themeId === id ? ' rpg-theme-option--active' : ''}`
+            }
+            onClick={() => onChange(id)}
+            aria-pressed={themeId === id}
+          >
+            {themeShortLabel(id)}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export default function App() {
   const [screen, setScreen] = useState<Screen>('menu')
+  const [settingsBackTarget, setSettingsBackTarget] = useState<'menu' | 'game'>('menu')
+  const [themeId, setThemeId] = useState<ThemeId>(() => readStoredTheme())
   const [hasSave, setHasSave] = useState(() => hasSavedGame())
   const [phase, setPhase] = useState<Phase>('name')
   const [playerNameInput, setPlayerNameInput] = useState('')
@@ -177,6 +265,9 @@ export default function App() {
   const pvpCombatRef = useRef<PvpCombatSnapshot | null>(null)
   const [pvpRoomCode, setPvpRoomCode] = useState<string | null>(null)
   const [pvpJoinInput, setPvpJoinInput] = useState('')
+  /** Host-configured wager before creating a room (guest sees rules from host). */
+  const [pvpDuelBetInput, setPvpDuelBetInput] = useState('0')
+  const [pvpStripeLoser, setPvpStripeLoser] = useState(false)
   const [pvpCombat, setPvpCombat] = useState<PvpCombatSnapshot | null>(null)
   const [pvpRole, setPvpRole] = useState<'host' | 'guest' | null>(null)
   const [pvpBusy, setPvpBusy] = useState(false)
@@ -186,6 +277,15 @@ export default function App() {
   const [pvpClashAnim, setPvpClashAnim] = useState<PvpLastContest | null>(null)
   const [pvpHitFlash, setPvpHitFlash] = useState(false)
   pvpCombatRef.current = pvpCombat
+
+  const pvpHostDuelOptsRef = useRef<{ betGold: number; stripeLoser: boolean }>({
+    betGold: 0,
+    stripeLoser: false,
+  })
+  const pvpGuestDuelRulesRef = useRef<{ betGold: number; stripeLoser: boolean }>({
+    betGold: 0,
+    stripeLoser: false,
+  })
 
   const resetExpedition = useCallback(() => {
     setCommittedPlace(null)
@@ -210,6 +310,7 @@ export default function App() {
     pvpGuestRpsRef.current = null
     setPvpClashAnim(null)
     setPvpHitFlash(false)
+    pvpGuestDuelRulesRef.current = { betGold: 0, stripeLoser: false }
   }, [])
 
   const endPvpWithDelay = useCallback(() => {
@@ -218,6 +319,31 @@ export default function App() {
       setPhase('multiplayer_hub')
     }, 120)
   }, [teardownPvp])
+
+  const finishPvpWithOutcome = useCallback(
+    (outcome: 'win' | 'loss') => {
+      appendLog(outcome === 'win' ? 'You win the duel.' : 'You lose the duel.')
+      const sess = pvpSessionRef.current
+      const role = sess?.getRole()
+      const snap = pvpCombatRef.current
+      if (role && snap) {
+        const delta = computePvpGoldDelta(snap, role, outcome)
+        if (delta !== 0) {
+          setPlayer((prev) => {
+            if (!prev) return prev
+            return { ...prev, gold: Math.max(0, prev.gold + delta) }
+          })
+          appendLog(
+            delta > 0
+              ? `You collect ${delta} gold from the wager.`
+              : `You pay ${-delta} gold on the wager.`,
+          )
+        }
+      }
+      endPvpWithDelay()
+    },
+    [appendLog, endPvpWithDelay],
+  )
 
   const applyPvpPhaseFromSnapshot = useCallback((snap: PvpCombatSnapshot) => {
     const sess = pvpSessionRef.current
@@ -258,15 +384,13 @@ export default function App() {
     )
     const outcome = pvpOutcomeForRole(next, role)
     if (outcome === 'win') {
-      appendLog('You win the duel.')
-      endPvpWithDelay()
+      finishPvpWithOutcome('win')
     } else if (outcome === 'loss') {
-      appendLog('You lose the duel.')
-      endPvpWithDelay()
+      finishPvpWithOutcome('loss')
     } else {
       applyPvpPhaseFromSnapshot(next)
     }
-  }, [appendLog, applyPvpPhaseFromSnapshot, endPvpWithDelay])
+  }, [applyPvpPhaseFromSnapshot, finishPvpWithOutcome])
 
   const hostSelectRps = useCallback(
     (choice: RpsChoice) => {
@@ -302,9 +426,28 @@ export default function App() {
     if (!sess || !remote || !p || !pvpSentProfileRef.current || pvpSyncedRef.current) return
     const role = sess.getRole()
     if (!role) return
+
+    let duelBetGold = 0
+    let stripeLoserMode = false
+    if (role === 'host') {
+      duelBetGold = pvpHostDuelOptsRef.current.betGold
+      stripeLoserMode = pvpHostDuelOptsRef.current.stripeLoser
+    } else {
+      duelBetGold = pvpGuestDuelRulesRef.current.betGold
+      stripeLoserMode = pvpGuestDuelRulesRef.current.stripeLoser
+    }
+
     const hostP = role === 'host' ? p : remote
     const guestP = role === 'guest' ? p : remote
-    const snap = buildInitialSnapshot(hostP, guestP)
+
+    if (duelBetGold > 0 && (hostP.gold < duelBetGold || guestP.gold < duelBetGold)) {
+      appendLog(`Duel cancelled: both fighters need at least ${duelBetGold} gold for this wager.`)
+      teardownPvp()
+      setPhase('multiplayer_hub')
+      return
+    }
+
+    const snap = buildInitialSnapshot(hostP, guestP, { duelBetGold, stripeLoserMode })
     pvpSyncedRef.current = true
     setPvpRole(role)
     setPvpCombat(snap)
@@ -312,8 +455,19 @@ export default function App() {
     appendLog(
       'Each exchange: Rock–Paper–Scissors; on a tie, a coin flip decides who strikes. Win the clash to attack.',
     )
+    if (stripeLoserMode && duelBetGold > 0) {
+      appendLog(
+        `Wager: ante ${duelBetGold} gold each · Stripe loser — the defeated forfeits every coin they brought into the duel.`,
+      )
+    } else if (stripeLoserMode) {
+      appendLog(`Wager: Stripe loser — the defeated forfeits every coin they brought into the duel.`)
+    } else if (duelBetGold > 0) {
+      appendLog(
+        `Wager: ${duelBetGold} gold from loser to winner (both fighters needed at least ${duelBetGold} gold to begin).`,
+      )
+    }
     applyPvpPhaseFromSnapshot(snap)
-  }, [appendLog, applyPvpPhaseFromSnapshot])
+  }, [appendLog, applyPvpPhaseFromSnapshot, setPhase, teardownPvp])
 
   const createPvpSessionInstance = useCallback(() => {
     return new PvpSession({
@@ -322,10 +476,38 @@ export default function App() {
         const sess = pvpSessionRef.current
         if (!p || !sess) return
         pvpSentProfileRef.current = true
-        sess.sendGame({ type: 'profile', profile: clonePlayer(p) })
+        const role = sess.getRole()
+        if (role === 'host') {
+          const opts = pvpHostDuelOptsRef.current
+          sess.sendGame({
+            type: 'host_ready',
+            profile: clonePlayer(p),
+            duelBetGold: opts.betGold,
+            stripeLoserMode: opts.stripeLoser,
+          })
+        } else {
+          sess.sendGame({ type: 'profile', profile: clonePlayer(p) })
+        }
         trySyncPvpBattle()
       },
       onGameMessage: (msg) => {
+        if (msg.type === 'host_ready') {
+          const loc = playerRef.current
+          if (msg.duelBetGold > 0 && loc && loc.gold < msg.duelBetGold) {
+            appendLog(
+              `Cannot join: host wager requires ${msg.duelBetGold} gold but you only have ${loc.gold}.`,
+            )
+            teardownPvp()
+            setPhase('multiplayer_hub')
+            return
+          }
+          pvpGuestDuelRulesRef.current = {
+            betGold: msg.duelBetGold,
+            stripeLoser: msg.stripeLoserMode,
+          }
+          pvpRemoteProfileRef.current = msg.profile
+          trySyncPvpBattle()
+        }
         if (msg.type === 'profile') {
           pvpRemoteProfileRef.current = msg.profile
           trySyncPvpBattle()
@@ -350,11 +532,9 @@ export default function App() {
           if (!role) return
           const outcome = pvpOutcomeForRole(msg.snapshot, role)
           if (outcome === 'win') {
-            appendLog('You win the duel.')
-            endPvpWithDelay()
+            finishPvpWithOutcome('win')
           } else if (outcome === 'loss') {
-            appendLog('You lose the duel.')
-            endPvpWithDelay()
+            finishPvpWithOutcome('loss')
           } else {
             applyPvpPhaseFromSnapshot(msg.snapshot)
           }
@@ -370,7 +550,8 @@ export default function App() {
   }, [
     appendLog,
     applyPvpPhaseFromSnapshot,
-    endPvpWithDelay,
+    finishPvpWithOutcome,
+    setPhase,
     teardownPvp,
     tryResolveRpsAsHost,
     trySyncPvpBattle,
@@ -378,6 +559,12 @@ export default function App() {
 
   const startPvpHost = useCallback(async () => {
     if (!player) return
+    const parsedBet = Math.max(0, Math.floor(Number(pvpDuelBetInput) || 0))
+    if (parsedBet > 0 && player.gold < parsedBet) {
+      setPvpErr(`You need at least ${parsedBet} gold to post this wager.`)
+      return
+    }
+    pvpHostDuelOptsRef.current = { betGold: parsedBet, stripeLoser: pvpStripeLoser }
     setPvpBusy(true)
     setPvpErr(null)
     teardownPvp()
@@ -395,7 +582,7 @@ export default function App() {
     } finally {
       setPvpBusy(false)
     }
-  }, [player, createPvpSessionInstance, teardownPvp])
+  }, [player, createPvpSessionInstance, pvpDuelBetInput, pvpStripeLoser, teardownPvp])
 
   const joinPvpGuest = useCallback(async () => {
     if (!player) return
@@ -436,15 +623,13 @@ export default function App() {
 
     const outcome = pvpOutcomeForRole(result.next, role)
     if (outcome === 'win') {
-      appendLog('You win the duel.')
-      endPvpWithDelay()
+      finishPvpWithOutcome('win')
     } else if (outcome === 'loss') {
-      appendLog('You lose the duel.')
-      endPvpWithDelay()
+      finishPvpWithOutcome('loss')
     } else {
       applyPvpPhaseFromSnapshot(result.next)
     }
-  }, [appendLog, applyPvpPhaseFromSnapshot, endPvpWithDelay])
+  }, [applyPvpPhaseFromSnapshot, finishPvpWithOutcome])
 
   const resolvePvpTurn = useCallback(
     (skillIndex: number) => {
@@ -468,16 +653,14 @@ export default function App() {
 
       const outcome = pvpOutcomeForRole(result.next, role)
       if (outcome === 'win') {
-        appendLog('You win the duel.')
-        endPvpWithDelay()
+        finishPvpWithOutcome('win')
       } else if (outcome === 'loss') {
-        appendLog('You lose the duel.')
-        endPvpWithDelay()
+        finishPvpWithOutcome('loss')
       } else {
         applyPvpPhaseFromSnapshot(result.next)
       }
     },
-    [appendLog, applyPvpPhaseFromSnapshot, endPvpWithDelay],
+    [appendLog, applyPvpPhaseFromSnapshot, finishPvpWithOutcome],
   )
 
   useEffect(() => {
@@ -554,6 +737,21 @@ export default function App() {
     }
     void go()
   }, [])
+
+  const onThemeChange = useCallback((id: ThemeId) => {
+    setThemeId(id)
+    writeStoredTheme(id)
+    applyThemeToDocument(id)
+  }, [])
+
+  const openSettings = useCallback((from: 'menu' | 'game') => {
+    setSettingsBackTarget(from)
+    setScreen('settings')
+  }, [])
+
+  const closeSettings = useCallback(() => {
+    setScreen(settingsBackTarget)
+  }, [settingsBackTarget])
 
   const resetToName = useCallback(() => {
     if (saveSlotIndex !== null) clearProgress(saveSlotIndex)
@@ -803,6 +1001,21 @@ export default function App() {
     ticked.lines.forEach((line) => appendLog(line))
 
     if (b.playerHp <= 0) {
+      const snap = applyMaxCaps({ ...player, hp: b.playerHp })
+      const rev = tryConsumeReviveFacet(snap, getMaxStats(snap).maxHp)
+      if (rev) {
+        appendLog('A facet of revival shatters — you stagger up at half health!')
+        const revived = applyMaxCaps({ ...rev.player, hp: rev.hp })
+        setPlayer(revived)
+        setBattle({
+          enemyHp: b.enemyHp,
+          playerHp: rev.hp,
+          playerStatuses: b.playerStatuses,
+          enemyStatuses: b.enemyStatuses,
+        })
+        setPhase('battle_menu')
+        return
+      }
       appendLog('You died.')
       if (saveSlotIndex !== null) clearProgress(saveSlotIndex)
       setHasSave(hasSavedGame())
@@ -826,14 +1039,24 @@ export default function App() {
     if (!enemyAttackHits(nextPlayer)) {
       appendLog(`${enemy.name} tries ${enemy.skill} — you slip aside!`)
     } else {
-      const abs = absorbDamageWithShield(playerStatuses, enemy.damage)
+      const incoming = resolveIncomingDamageFromEnemy(enemy, nextPlayer)
+      const ctrl = filterIncomingPlayerApplies(
+        nextPlayer,
+        playerStatuses,
+        enemy.playerStatusesOnHit ?? [],
+      )
+      nextPlayer = ctrl.player
+      ctrl.logs.forEach((ln) => appendLog(ln))
+
+      const abs = absorbDamageWithShield(playerStatuses, incoming.grossDamage)
       b.playerHp = Math.max(0, b.playerHp - abs.damageToHp)
-      playerStatuses = mergeStatuses(abs.statuses, enemy.playerStatusesOnHit ?? [])
-      const soaked = enemy.damage - abs.damageToHp
+      playerStatuses = mergeStatuses(abs.statuses, ctrl.applies)
+      const soaked = incoming.grossDamage - abs.damageToHp
+      const note = incoming.affinityNote
       appendLog(
         soaked > 0
-          ? `${enemy.name} uses ${enemy.skill} — ${fmt(soaked)} absorbed by shield; you take ${fmt(abs.damageToHp)} to HP.`
-          : `${enemy.name} uses ${enemy.skill} — deals ${fmt(enemy.damage)} damage.`,
+          ? `${enemy.name} uses ${enemy.skill} (${incoming.atkKind}) — ${fmt(soaked)} absorbed by shield; you take ${fmt(abs.damageToHp)} to HP${note ? ` (${note})` : ''}.`
+          : `${enemy.name} uses ${enemy.skill} — deals ${fmt(incoming.grossDamage)} ${incoming.atkKind} damage${note ? ` (${note})` : ''}.`,
       )
     }
 
@@ -845,6 +1068,20 @@ export default function App() {
     })
 
     if (b.playerHp <= 0) {
+      const rev = tryConsumeReviveFacet(nextPlayer, getMaxStats(nextPlayer).maxHp)
+      if (rev) {
+        appendLog('A facet of revival shatters — you stagger up at half health!')
+        const revived = applyMaxCaps({ ...rev.player, hp: rev.hp })
+        setPlayer(revived)
+        setBattle({
+          enemyHp: b.enemyHp,
+          playerHp: rev.hp,
+          playerStatuses,
+          enemyStatuses: b.enemyStatuses,
+        })
+        setPhase('battle_menu')
+        return
+      }
       appendLog('You died.')
       if (saveSlotIndex !== null) clearProgress(saveSlotIndex)
       setHasSave(hasSavedGame())
@@ -869,6 +1106,21 @@ export default function App() {
       ticked.lines.forEach((line) => appendLog(line))
 
       if (b.playerHp <= 0) {
+        const snap = applyMaxCaps({ ...player, hp: b.playerHp })
+        const rev = tryConsumeReviveFacet(snap, getMaxStats(snap).maxHp)
+        if (rev) {
+          appendLog('A facet of revival shatters — you stagger up at half health!')
+          const revived = applyMaxCaps({ ...rev.player, hp: rev.hp })
+          setPlayer(revived)
+          setBattle({
+            enemyHp: b.enemyHp,
+            playerHp: rev.hp,
+            playerStatuses: b.playerStatuses,
+            enemyStatuses: b.enemyStatuses,
+          })
+          setPhase('battle_menu')
+          return
+        }
         appendLog('You died.')
         if (saveSlotIndex !== null) clearProgress(saveSlotIndex)
         setHasSave(hasSavedGame())
@@ -926,23 +1178,55 @@ export default function App() {
       const split = splitSkillStatuses(sk)
       const emp = consumeEmpoweredBonus(b.playerStatuses)
       let playerStatuses = emp.statuses
-      const rawDmg = getEffectiveSkillDamage(player, sk) + emp.bonus
+      const skillGearId = entry.kind === 'gear' ? entry.gearId : undefined
+      let rawDmg = getEffectiveSkillDamage(player, sk, playerStatuses, skillGearId) + emp.bonus
+      const surge = applySurgeToOutgoingDamage(player, rawDmg)
+      rawDmg = surge.damage
 
-      const enemyShield = absorbDamageWithShield(b.enemyStatuses, rawDmg)
+      const dmgKind = defaultSkillDamageKind(sk)
+      const affMult = enemyTakenMultiplier(enemy, dmgKind)
+      const adjustedDmg = Math.max(0, Math.floor(rawDmg * affMult))
+      const affNote = describeOutgoingAffinity(affMult)
+
+      let onEnemyStatuses = split.onEnemy
+      if (enemy.stunImmune) {
+        const hadStun = onEnemyStatuses.some((s) => s.id === 'stunned')
+        onEnemyStatuses = filterStunApplies(onEnemyStatuses, true)
+        if (hadStun) appendLog(`${enemy.name} shrugs off the stun.`)
+      }
+
+      const enemyShield = absorbDamageWithShield(b.enemyStatuses, adjustedDmg)
       b.enemyHp = Math.max(0, b.enemyHp - enemyShield.damageToHp)
-      let enemyStatuses = mergeStatuses(enemyShield.statuses, split.onEnemy)
+      let enemyStatuses = mergeStatuses(enemyShield.statuses, onEnemyStatuses)
       playerStatuses = mergeStatuses(playerStatuses, split.onSelf)
 
       const skillLine =
         entry.kind === 'gear' && entry.gearId
           ? `${sk.name} (${GEAR_BY_ID[entry.gearId]?.name ?? 'gear'})`
           : sk.name
-      const soak = rawDmg - enemyShield.damageToHp
+      const soak = adjustedDmg - enemyShield.damageToHp
+      const surgeBit = surge.surgeLabel ? ` ${surge.surgeLabel}!` : ''
       appendLog(
         soak > 0
-          ? `You use ${skillLine} — ${fmt(rawDmg)} raw; ${fmt(soak)} absorbed by foe shield; ${fmt(enemyShield.damageToHp)} to HP.`
-          : `You use ${skillLine} — deals ${fmt(rawDmg)} damage.`,
+          ? `You use ${skillLine} — ${fmt(adjustedDmg)} ${dmgKind}${affNote ? ` (${affNote})` : ''}${surgeBit}; ${fmt(soak)} absorbed by foe shield; ${fmt(enemyShield.damageToHp)} to HP.`
+          : `You use ${skillLine} — deals ${fmt(adjustedDmg)} ${dmgKind} damage${affNote ? ` (${affNote})` : ''}.${surgeBit}`,
       )
+
+      const lsPct = aggregateLifeStealPercent(nextPlayer)
+      const hpToEnemy = enemyShield.damageToHp
+      if (lsPct > 0 && hpToEnemy > 0) {
+        const healAmt = Math.floor(hpToEnemy * (lsPct / 100))
+        if (healAmt > 0) {
+          const maxHp = getMaxStats(nextPlayer).maxHp
+          const nh = Math.min(maxHp, b.playerHp + healAmt)
+          const gained = nh - b.playerHp
+          if (gained > 0) {
+            b.playerHp = nh
+            nextPlayer = { ...nextPlayer, hp: nh }
+            appendLog(`Your innate drinks ${fmt(gained)} HP from the wound.`)
+          }
+        }
+      }
       if (gearJustBroke && entry.kind === 'gear' && entry.gearId) {
         appendLog(
           `${GEAR_BY_ID[entry.gearId]?.name ?? 'Your gear'} breaks — repair at the blacksmith to use that skill again.`,
@@ -957,18 +1241,64 @@ export default function App() {
       if (!enemyAttackHits(nextPlayer)) {
         appendLog(`${enemy.name} tries ${enemy.skill} — you slip aside!`)
       } else {
-        const abs = absorbDamageWithShield(playerStatuses, enemy.damage)
+        const incoming = resolveIncomingDamageFromEnemy(enemy, nextPlayer)
+        const sanctuaryMul = aggregateSanctuaryTakenMul(nextPlayer)
+        const grossAfterGift = Math.max(
+          0,
+          Math.floor(incoming.grossDamage * sanctuaryMul),
+        )
+        const ctrl = filterIncomingPlayerApplies(
+          nextPlayer,
+          playerStatuses,
+          enemy.playerStatusesOnHit ?? [],
+        )
+        nextPlayer = ctrl.player
+        ctrl.logs.forEach((ln) => appendLog(ln))
+
+        const abs = absorbDamageWithShield(playerStatuses, grossAfterGift)
         b.playerHp = Math.max(0, b.playerHp - abs.damageToHp)
-        playerStatuses = mergeStatuses(abs.statuses, enemy.playerStatusesOnHit ?? [])
-        const soaked = enemy.damage - abs.damageToHp
+        playerStatuses = mergeStatuses(abs.statuses, ctrl.applies)
+        const soaked = grossAfterGift - abs.damageToHp
+        const note = incoming.affinityNote
+        const giftNote = sanctuaryMul < 0.999 ? ' Innate sanctuary softens it.' : ''
         appendLog(
           soaked > 0
-            ? `${enemy.name} uses ${enemy.skill} — ${fmt(soaked)} absorbed by shield; you take ${fmt(abs.damageToHp)} to HP.`
-            : `${enemy.name} uses ${enemy.skill} — deals ${fmt(enemy.damage)} damage.`,
+            ? `${enemy.name} uses ${enemy.skill} (${incoming.atkKind}) — ${fmt(soaked)} absorbed by shield; you take ${fmt(abs.damageToHp)} to HP${note ? ` (${note})` : ''}.${giftNote}`
+            : `${enemy.name} uses ${enemy.skill} — deals ${fmt(grossAfterGift)} ${incoming.atkKind} damage${note ? ` (${note})` : ''}.${giftNote}`,
         )
+
+        const thPct = aggregateThornReflectPercent(nextPlayer)
+        const takenHp = abs.damageToHp
+        if (thPct > 0 && takenHp > 0 && b.enemyHp > 0) {
+          const echo = Math.floor(takenHp * (thPct / 100))
+          if (echo > 0) {
+            b.enemyHp = Math.max(0, b.enemyHp - echo)
+            appendLog(`Thorn verdict — ${fmt(echo)} damage echoes into ${enemy.name}.`)
+          }
+        }
+
+        if (b.enemyHp <= 0) {
+          grantPvEVictory(applyMaxCaps({ ...nextPlayer, hp: b.playerHp }), enemy)
+          return
+        }
       }
 
       if (b.playerHp <= 0) {
+        const rev = tryConsumeReviveFacet(nextPlayer, getMaxStats(nextPlayer).maxHp)
+        if (rev) {
+          appendLog('A facet of revival shatters — you stagger up at half health!')
+          const revived = applyMaxCaps({ ...rev.player, hp: rev.hp })
+          b.playerHp = rev.hp
+          setPlayer(revived)
+          setBattle({
+            enemyHp: b.enemyHp,
+            playerHp: rev.hp,
+            playerStatuses,
+            enemyStatuses,
+          })
+          setPhase('battle_menu')
+          return
+        }
         appendLog('You died.')
         if (saveSlotIndex !== null) clearProgress(saveSlotIndex)
         setHasSave(hasSavedGame())
@@ -1153,16 +1483,40 @@ export default function App() {
   const usePotionAdventure = useCallback(
     (kind: 'hp' | 'mana' | 'sta') => {
       if (!player) return
+      const beforeHp = player.hp
+      const beforeMana = player.mana
+      const beforeSta = player.stamina
       let next: PlayerState | null = null
       if (kind === 'hp') next = tryUseHealthPotion(player)
       else if (kind === 'mana') next = tryUseManaDraught(player)
       else next = tryUseStaminaBrew(player)
       if (!next) return
       setPlayer(next)
-      appendLog(kind === 'hp' ? 'You drink a Red Tonic.' : kind === 'mana' ? 'You drink a Blue Tonic.' : 'You drink a Green Tonic.')
+      if (kind === 'hp') {
+        appendLog(`You drink a Red Tonic (+${fmt(next.hp - beforeHp)} HP).`)
+      } else if (kind === 'mana') {
+        appendLog(`You drink a Blue Tonic (+${fmt(next.mana - beforeMana)} MP).`)
+      } else {
+        appendLog(`You drink a Green Tonic (+${fmt(next.stamina - beforeSta)} STA).`)
+      }
     },
     [appendLog, player],
   )
+
+  const useSunriseCordialAdventure = useCallback(() => {
+    if (!player) return
+    const beforeHp = player.hp
+    const beforeMana = player.mana
+    const beforeSta = player.stamina
+    const next = tryUseSunriseCordial(player)
+    if (!next) return
+    setPlayer(next)
+    appendLog(
+      `You drink Sunrise Cordial (+${fmt(next.hp - beforeHp)} HP, +${fmt(next.mana - beforeMana)} MP, +${fmt(
+        next.stamina - beforeSta,
+      )} STA).`,
+    )
+  }, [appendLog, player])
 
   const maxStats = player ? getMaxStats(player) : null
   const effStats = player ? getEffectiveStats(player) : null
@@ -1269,23 +1623,55 @@ export default function App() {
               Save &amp; menu
             </button>
           </div>
-          {player && (player.inventory.healthPotion > 0 || player.inventory.manaDraught > 0 || player.inventory.staminaBrew > 0) && (
+          {player &&
+            (player.inventory.healthPotion > 0 ||
+              player.inventory.manaDraught > 0 ||
+              player.inventory.staminaBrew > 0 ||
+              player.inventory.sunriseCordial > 0) && (
             <div className="rpg-adventure-inventory">
               <div className="rpg-inventory-actions">
                 <span className="rpg-inventory-label">Tonics</span>
                 {player.inventory.healthPotion > 0 && (
-                  <button type="button" className="rpg-tiny" onClick={() => usePotionAdventure('hp')}>
-                    Red ×{player.inventory.healthPotion}
+                  <button
+                    type="button"
+                    className="rpg-tiny"
+                    title={`~${fmt(getHealthPotionHeal(player))} HP (Vitality & max HP)`}
+                    onClick={() => usePotionAdventure('hp')}
+                  >
+                    Red ×{player.inventory.healthPotion} (+{fmt(getHealthPotionHeal(player))})
                   </button>
                 )}
                 {player.inventory.manaDraught > 0 && (
-                  <button type="button" className="rpg-tiny" onClick={() => usePotionAdventure('mana')}>
-                    Blue ×{player.inventory.manaDraught}
+                  <button
+                    type="button"
+                    className="rpg-tiny"
+                    title={`~${fmt(getManaDraughtRestore(player))} MP (Arcana & max mana)`}
+                    onClick={() => usePotionAdventure('mana')}
+                  >
+                    Blue ×{player.inventory.manaDraught} (+{fmt(getManaDraughtRestore(player))})
                   </button>
                 )}
                 {player.inventory.staminaBrew > 0 && (
-                  <button type="button" className="rpg-tiny" onClick={() => usePotionAdventure('sta')}>
-                    Green ×{player.inventory.staminaBrew}
+                  <button
+                    type="button"
+                    className="rpg-tiny"
+                    title={`~${fmt(getStaminaBrewRestore(player))} STA (Endurance & max stamina)`}
+                    onClick={() => usePotionAdventure('sta')}
+                  >
+                    Green ×{player.inventory.staminaBrew} (+{fmt(getStaminaBrewRestore(player))})
+                  </button>
+                )}
+                {player.inventory.sunriseCordial > 0 && (
+                  <button
+                    type="button"
+                    className="rpg-tiny"
+                    title={(() => {
+                      const r = getSunriseCordialRestore(player)
+                      return `~${fmt(r.hp)} HP / ${fmt(r.mana)} MP / ${fmt(r.stamina)} STA`
+                    })()}
+                    onClick={() => useSunriseCordialAdventure()}
+                  >
+                    Sunrise ×{player.inventory.sunriseCordial}
                   </button>
                 )}
               </div>
@@ -1322,6 +1708,8 @@ export default function App() {
       )
     }
     if (phase === 'multiplayer_hub' && player) {
+      const hostBetParsed = Math.max(0, Math.floor(Number(pvpDuelBetInput) || 0))
+      const hostCantAffordAnte = hostBetParsed > 0 && player.gold < hostBetParsed
       return (
         <div className="rpg-mp-hub">
           <header className="rpg-mp-hub__hero">
@@ -1336,10 +1724,40 @@ export default function App() {
               Host a match
             </h3>
             <p className="rpg-mp-hub__panel-desc">You&apos;ll receive a 6-character code to give your opponent.</p>
+            <div className="rpg-mp-hub__duel" role="group" aria-label="Duel stakes">
+              <label className="rpg-mp-hub__label" htmlFor="pvp-duel-bet">
+                Bet (gold){' '}
+                <span className="rpg-mp-hub__label-hint">0 = casual · both need enough to start</span>
+              </label>
+              <input
+                id="pvp-duel-bet"
+                className="rpg-mp-hub__input rpg-mp-hub__input--narrow"
+                type="number"
+                inputMode="numeric"
+                min={0}
+                step={1}
+                value={pvpDuelBetInput}
+                onChange={(e) => setPvpDuelBetInput(e.target.value.replace(/[^\d]/g, ''))}
+                aria-describedby="pvp-duel-bet-help"
+              />
+              <p id="pvp-duel-bet-help" className="rpg-mp-hub__duel-help">
+                Your gold: <strong>{player.gold}</strong>. Loser pays this much to the winner (unless Stripe loser is on).
+              </p>
+              <label className="rpg-mp-hub__check">
+                <input
+                  type="checkbox"
+                  checked={pvpStripeLoser}
+                  onChange={(e) => setPvpStripeLoser(e.target.checked)}
+                />
+                Stripe loser — defeated player loses <strong>all</strong> gold they had when the duel began (winner
+                receives it).
+              </label>
+            </div>
             <button
               type="button"
               className="rpg-mp-hub__cta"
-              disabled={pvpBusy}
+              disabled={pvpBusy || hostCantAffordAnte}
+              title={hostCantAffordAnte ? 'Not enough gold for this ante' : undefined}
               onClick={() => void startPvpHost()}
             >
               Create PVP room
@@ -1425,6 +1843,16 @@ export default function App() {
         <div className="rpg-actions rpg-pvp-wait">
           <div className="rpg-pvp-wait__inner">
             <p className="rpg-pvp-wait__title">Waiting for opponent</p>
+            <p className="rpg-pvp-wait__rules" aria-live="polite">
+              {(() => {
+                const o = pvpHostDuelOptsRef.current
+                if (o.betGold <= 0 && !o.stripeLoser) return 'Casual duel — no gold stake.'
+                const bits: string[] = []
+                if (o.betGold > 0) bits.push(`${o.betGold}g ante`)
+                if (o.stripeLoser) bits.push('Stripe loser')
+                return `Stakes: ${bits.join(' · ')}.`
+              })()}
+            </p>
             <p className="rpg-pvp-wait__sub">Share this 6-character code:</p>
             <div className="rpg-pvp-room-code" aria-label="Room code">
               {(pvpRoomCode ?? '······')
@@ -1561,7 +1989,14 @@ export default function App() {
           <p className="rpg-skill-picker__hint">PvP — you won the clash; choose a technique</p>
           <div className="rpg-skill-picker__grid" role="list">
             {combatSkills.map((ent, idx) => {
-              const eff = getEffectiveSkillDamage(strikerProfile, ent.skill)
+              const strikerSt =
+                pvpRole === 'host' ? pvpCombat.hostStatuses : pvpCombat.guestStatuses
+              const eff = getEffectiveSkillDamage(
+                strikerProfile,
+                ent.skill,
+                strikerSt ?? null,
+                ent.kind === 'gear' ? ent.gearId : undefined,
+              )
               const mc = getEffectiveManaCost(strikerProfile, ent.skill)
               const sc = getEffectiveStaminaCost(strikerProfile, ent.skill)
               const wear = ent.kind === 'gear' ? wearPerAttackUse(ent.skill) : null
@@ -1658,10 +2093,19 @@ export default function App() {
                 player &&
                 (player.inventory.healthPotion > 0 ||
                   player.inventory.manaDraught > 0 ||
-                  player.inventory.staminaBrew > 0)
+                  player.inventory.staminaBrew > 0 ||
+                  player.inventory.sunriseCordial > 0 ||
+                  player.inventory.cleanseScroll > 0 ||
+                  player.inventory.immunePhilter > 0 ||
+                  player.inventory.immuneElixir > 0 ||
+                  player.inventory.mightDraught > 0 ||
+                  player.inventory.prismaticDraught > 0 ||
+                  player.inventory.apexMightDraught > 0 ||
+                  player.inventory.veilPhilter > 0 ||
+                  player.inventory.championCordial > 0)
               ) {
                 setPhase('use_item_battle')
-              } else appendLog('No tonics in your pack.')
+              } else appendLog('No battle-usable items in your pack.')
             }}
           >
             Items
@@ -1703,7 +2147,12 @@ export default function App() {
           <p className="rpg-skill-picker__hint">Choose a technique</p>
           <div className="rpg-skill-picker__grid" role="list">
             {combatSkills.map((ent, idx) => {
-              const eff = getEffectiveSkillDamage(player, ent.skill)
+              const eff = getEffectiveSkillDamage(
+                player,
+                ent.skill,
+                battle?.playerStatuses ?? null,
+                ent.kind === 'gear' ? ent.gearId : undefined,
+              )
               const mc = getEffectiveManaCost(player, ent.skill)
               const sc = getEffectiveStaminaCost(player, ent.skill)
               const wear = ent.kind === 'gear' ? wearPerAttackUse(ent.skill) : null
@@ -1771,47 +2220,246 @@ export default function App() {
           {player.inventory.healthPotion > 0 && (
             <button
               type="button"
+              title={`Restore up to ${fmt(getHealthPotionHeal(player))} HP (Vitality & max HP)`}
               onClick={() => {
+                const before = player.hp
                 const next = tryUseHealthPotion(player)
                 if (next) {
                   setPlayer(next)
-                  appendLog('You drink a Red Tonic (+40 HP).')
+                  appendLog(`You drink a Red Tonic (+${fmt(next.hp - before)} HP).`)
                   setBattle((prev) => (prev ? { ...prev, playerHp: next.hp } : prev))
                   setPhase('battle_menu')
                 }
               }}
             >
-              Red tonic ×{player.inventory.healthPotion}
+              Red tonic ×{player.inventory.healthPotion} (+{fmt(getHealthPotionHeal(player))} HP)
             </button>
           )}
           {player.inventory.manaDraught > 0 && (
             <button
               type="button"
+              title={`Restore up to ${fmt(getManaDraughtRestore(player))} MP (Arcana & max mana)`}
               onClick={() => {
+                const before = player.mana
                 const next = tryUseManaDraught(player)
                 if (next) {
                   setPlayer(next)
-                  appendLog('You drink a Blue Tonic (+35 MP).')
+                  appendLog(`You drink a Blue Tonic (+${fmt(next.mana - before)} MP).`)
                   setPhase('battle_menu')
                 }
               }}
             >
-              Blue tonic ×{player.inventory.manaDraught}
+              Blue tonic ×{player.inventory.manaDraught} (+{fmt(getManaDraughtRestore(player))} MP)
             </button>
           )}
           {player.inventory.staminaBrew > 0 && (
             <button
               type="button"
+              title={`Restore up to ${fmt(getStaminaBrewRestore(player))} STA (Endurance & max stamina)`}
               onClick={() => {
+                const before = player.stamina
                 const next = tryUseStaminaBrew(player)
                 if (next) {
                   setPlayer(next)
-                  appendLog('You drink a Green Tonic (+30 STA).')
+                  appendLog(`You drink a Green Tonic (+${fmt(next.stamina - before)} STA).`)
                   setPhase('battle_menu')
                 }
               }}
             >
-              Green tonic ×{player.inventory.staminaBrew}
+              Green tonic ×{player.inventory.staminaBrew} (+{fmt(getStaminaBrewRestore(player))} STA)
+            </button>
+          )}
+          {player.inventory.sunriseCordial > 0 && battle && (
+            <button
+              type="button"
+              title="Restore HP, MP, and STA (~58% of each tonic’s potency)"
+              onClick={() => {
+                const beforeHp = player.hp
+                const beforeMana = player.mana
+                const beforeSta = player.stamina
+                const next = tryUseSunriseCordial(player)
+                if (next) {
+                  setPlayer(next)
+                  appendLog(
+                    `You drink Sunrise Cordial (+${fmt(next.hp - beforeHp)} HP, +${fmt(next.mana - beforeMana)} MP, +${fmt(
+                      next.stamina - beforeSta,
+                    )} STA).`,
+                  )
+                  setBattle((prev) => (prev ? { ...prev, playerHp: next.hp } : prev))
+                  setPhase('battle_menu')
+                }
+              }}
+            >
+              Sunrise cordial ×{player.inventory.sunriseCordial}
+            </button>
+          )}
+          {player.inventory.cleanseScroll > 0 && battle && (
+            <button
+              type="button"
+              onClick={() => {
+                const next = tryConsumeCleanseScroll(player)
+                if (next) {
+                  setPlayer(next)
+                  appendLog('You read a Cleanse Scroll — every buff and debuff slips away.')
+                  setBattle({ ...battle, playerStatuses: cleanseAllStatuses() })
+                  setPhase('battle_menu')
+                }
+              }}
+            >
+              Cleanse scroll ×{player.inventory.cleanseScroll}
+            </button>
+          )}
+          {player.inventory.immunePhilter > 0 && battle && (
+            <button
+              type="button"
+              onClick={() => {
+                const next = tryConsumeImmunePhilter(player)
+                if (next) {
+                  setPlayer(next)
+                  setBattle({
+                    ...battle,
+                    playerStatuses: mergeStatuses(battle.playerStatuses, [
+                      { id: 'immune', turns: 5, potency: 0 },
+                    ]),
+                  })
+                  appendLog('You drink a Spellbound Philter — Aegis wards stuns for 5 turns.')
+                  setPhase('battle_menu')
+                }
+              }}
+            >
+              Spellbound Philter ×{player.inventory.immunePhilter}
+            </button>
+          )}
+          {player.inventory.immuneElixir > 0 && battle && (
+            <button
+              type="button"
+              onClick={() => {
+                const next = tryConsumeImmuneElixir(player)
+                if (next) {
+                  setPlayer(next)
+                  setBattle({
+                    ...battle,
+                    playerStatuses: mergeStatuses(battle.playerStatuses, [
+                      { id: 'immune', turns: 10, potency: 0 },
+                    ]),
+                  })
+                  appendLog('You drink the Greater Aegis Elixir — long immunity to stuns.')
+                  setPhase('battle_menu')
+                }
+              }}
+            >
+              Aegis Elixir ×{player.inventory.immuneElixir}
+            </button>
+          )}
+          {player.inventory.mightDraught > 0 && battle && (
+            <button
+              type="button"
+              onClick={() => {
+                const next = tryConsumeMightDraught(player)
+                if (next) {
+                  setPlayer(next)
+                  setBattle({
+                    ...battle,
+                    playerStatuses: mergeStatuses(battle.playerStatuses, [
+                      { id: 'might', turns: 5, potency: 12 },
+                    ]),
+                  })
+                  appendLog('You drink Battle Might — muscles surge (+12 strike power, 5 turns).')
+                  setPhase('battle_menu')
+                }
+              }}
+            >
+              Might draught ×{player.inventory.mightDraught}
+            </button>
+          )}
+          {player.inventory.prismaticDraught > 0 && battle && (
+            <button
+              type="button"
+              onClick={() => {
+                const next = tryConsumePrismaticDraught(player)
+                if (next) {
+                  setPlayer(next)
+                  setBattle({
+                    ...battle,
+                    playerStatuses: mergeStatuses(battle.playerStatuses, [
+                      { id: 'shielded', turns: 5, potency: 58 },
+                      { id: 'might', turns: 5, potency: 14 },
+                    ]),
+                  })
+                  appendLog(
+                    'You drink the Prismatic Bulwark — a prism shield rises and might floods your arms (+14 strike, 5 turns).',
+                  )
+                  setPhase('battle_menu')
+                }
+              }}
+            >
+              Prismatic bulwark ×{player.inventory.prismaticDraught}
+            </button>
+          )}
+          {player.inventory.apexMightDraught > 0 && battle && (
+            <button
+              type="button"
+              onClick={() => {
+                const next = tryConsumeApexMightDraught(player)
+                if (next) {
+                  setPlayer(next)
+                  setBattle({
+                    ...battle,
+                    playerStatuses: mergeStatuses(battle.playerStatuses, [
+                      { id: 'might', turns: 5, potency: 24 },
+                    ]),
+                  })
+                  appendLog('You uncork Apex Might — world-champion surge (+24 strike, 5 turns).')
+                  setPhase('battle_menu')
+                }
+              }}
+            >
+              Apex Might ×{player.inventory.apexMightDraught}
+            </button>
+          )}
+          {player.inventory.veilPhilter > 0 && battle && (
+            <button
+              type="button"
+              onClick={() => {
+                const next = tryConsumeVeilPhilter(player)
+                if (next) {
+                  setPlayer(next)
+                  setBattle({
+                    ...battle,
+                    playerStatuses: mergeStatuses(battle.playerStatuses, [
+                      { id: 'immune', turns: 8, potency: 0 },
+                    ]),
+                  })
+                  appendLog('You drink the Veil Philter — Aegis silences stuns for eight turns.')
+                  setPhase('battle_menu')
+                }
+              }}
+            >
+              Veil Philter ×{player.inventory.veilPhilter}
+            </button>
+          )}
+          {player.inventory.championCordial > 0 && battle && (
+            <button
+              type="button"
+              onClick={() => {
+                const next = tryConsumeChampionCordial(player)
+                if (next) {
+                  setPlayer(next)
+                  setBattle({
+                    ...battle,
+                    playerStatuses: mergeStatuses(battle.playerStatuses, [
+                      { id: 'might', turns: 5, potency: 20 },
+                      { id: 'immune', turns: 4, potency: 0 },
+                    ]),
+                  })
+                  appendLog(
+                    'You drink Champion Sovereign Cordial — crowned might (+20 strike) and aegis lace your veins.',
+                  )
+                  setPhase('battle_menu')
+                }
+              }}
+            >
+              Champion cordial ×{player.inventory.championCordial}
             </button>
           )}
           <button type="button" onClick={() => setPhase('battle_menu')}>
@@ -1855,6 +2503,7 @@ export default function App() {
     runFromBattle,
     unequipSlot,
     usePotionAdventure,
+    useSunriseCordialAdventure,
     committedPlace,
     expeditionFightCount,
     guestSelectRps,
@@ -1862,6 +2511,8 @@ export default function App() {
     joinPvpGuest,
     pvpBusy,
     pvpCombat,
+    pvpDuelBetInput,
+    pvpStripeLoser,
     resolvePvpStunnedPass,
     pvpErr,
     pvpJoinInput,
@@ -1869,6 +2520,7 @@ export default function App() {
     pvpRoomCode,
     resetExpedition,
     resolvePvpTurn,
+    finishPvpWithOutcome,
     startPvpHost,
     teardownPvp,
   ])
@@ -1948,6 +2600,66 @@ export default function App() {
       </div>
     ) : null
 
+  if (screen === 'settings') {
+    return (
+      <>
+        {splashOverlay}
+        <div
+          className={`app-root app-root--fullscreen${splashPhase === 'gone' ? ' rpg-app-reveal' : ''}`}
+        >
+          <div className="rpg-shell rpg-shell--fullscreen rpg-settings-shell">
+            <button
+              type="button"
+              className="rpg-fs-btn"
+              title={browserFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+              aria-label={browserFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+              onClick={toggleBrowserFullscreen}
+            >
+              <IconFullscreen expanded={browserFullscreen} size={20} />
+            </button>
+            <header className="rpg-ios-nav" aria-label="Settings navigation">
+              <button type="button" className="rpg-ios-nav__back" onClick={closeSettings}>
+                Back
+              </button>
+              <h1 className="rpg-ios-nav__title">Settings</h1>
+            </header>
+
+            <div className="rpg-ios-settings">
+              <section className="rpg-ios-settings__group" aria-labelledby="rpg-settings-theme">
+                <h2 id="rpg-settings-theme" className="rpg-ios-settings__header">
+                  Theme
+                </h2>
+                <div className="rpg-ios-settings__inset">
+                  <ThemeSettings themeId={themeId} onChange={onThemeChange} variant="ios" />
+                </div>
+              </section>
+
+              <section className="rpg-ios-settings__group" aria-labelledby="rpg-settings-about">
+                <h2 id="rpg-settings-about" className="rpg-ios-settings__header">
+                  About
+                </h2>
+                <div className="rpg-ios-settings__inset">
+                  <div className="rpg-ios-settings__row">
+                    <span className="rpg-ios-settings__row-label">Game</span>
+                    <span className="rpg-ios-settings__row-value">Frappe Text Adventure RPG</span>
+                  </div>
+                  <div className="rpg-ios-settings__row">
+                    <span className="rpg-ios-settings__row-label">Traveler&apos;s Grimoire</span>
+                    <span className="rpg-ios-settings__row-value">Parchment &amp; ink UI</span>
+                  </div>
+                </div>
+              </section>
+            </div>
+
+            <p className="rpg-meta rpg-settings-meta">
+              Theme: Classic (neobrutal), Silk (soft UI), or Grimoire (journal) — saved as “{themeShortLabel(themeId)}” on this device.
+            </p>
+          </div>
+        </div>
+      </>
+    )
+  }
+
   if (screen === 'menu') {
     return (
       <>
@@ -1979,6 +2691,17 @@ export default function App() {
               Pick a save slot — each adventurer keeps their own progress in this browser.
             </p>
             {hasSave && <p className="rpg-menu-save">You have one or more heroes saved on this device.</p>}
+            <button
+              type="button"
+              className="rpg-menu-settings-entry"
+              onClick={() => openSettings('menu')}
+              disabled={gameBooting}
+            >
+              <span className="rpg-menu-settings-entry__label">Settings</span>
+              <span className="rpg-menu-settings-entry__chev" aria-hidden>
+                ›
+              </span>
+            </button>
             <div className="rpg-menu-slots" aria-label="Character save slots">
               {listSlotSummaries().map(({ index, player: slotPlayer }) => (
                 <div
@@ -2139,18 +2862,18 @@ export default function App() {
                         phase === 'pvp_battle_menu' ||
                         phase === 'pvp_pick_skill' ||
                         phase === 'pvp_rps') && (
-                        <button
-                          type="button"
-                          className="rpg-dashboard-back"
-                          title="Return to the world map"
-                          onClick={() => {
-                            teardownPvp()
-                            setPhase('adventure')
-                          }}
-                        >
-                          Back
-                        </button>
-                      )}
+                          <button
+                            type="button"
+                            className="rpg-dashboard-back"
+                            title="Return to the world map"
+                            onClick={() => {
+                              teardownPvp()
+                              setPhase('adventure')
+                            }}
+                          >
+                            Back
+                          </button>
+                        )}
                       <span className="rpg-hud-badge">
                         Lv <strong>{player.level}</strong>
                       </span>
@@ -2216,15 +2939,54 @@ export default function App() {
                         phase === 'pick_skill' ||
                         phase === 'use_item_battle' ||
                         phase === 'confirm_home') && (
-                      <div className="rpg-statline" style={{ marginTop: '0.3rem' }} title="Combat effects">
-                        <span style={{ flex: 1, fontSize: '0.88rem', opacity: 0.92 }}>
-                          On you:{' '}
-                          {battle.playerStatuses.map((s) => formatStatusLine(s)).join(' · ')}
-                        </span>
-                      </div>
-                    )}
+                        <div className="rpg-statline" style={{ marginTop: '0.3rem' }} title="Combat effects">
+                          <span style={{ flex: 1, fontSize: '0.88rem', opacity: 0.92 }}>
+                            On you:{' '}
+                            {battle.playerStatuses.map((s) => formatStatusLine(s)).join(' · ')}
+                          </span>
+                        </div>
+                      )}
+                    {pvpCombat &&
+                      pvpRole &&
+                      (phase === 'pvp_battle_menu' ||
+                        phase === 'pvp_pick_skill' ||
+                        phase === 'pvp_rps') &&
+                      (pvpRole === 'host' ? pvpCombat.hostStatuses : pvpCombat.guestStatuses)
+                        ?.length ? (
+                        <div
+                          className="rpg-statline rpg-pvp-status-line"
+                          style={{ marginTop: '0.3rem' }}
+                          title="Duel effects on you"
+                        >
+                          <span style={{ flex: 1, fontSize: '0.88rem', opacity: 0.92 }}>
+                            Duel — on you:{' '}
+                            {(pvpRole === 'host' ? pvpCombat.hostStatuses : pvpCombat.guestStatuses)!
+                              .map((s) => formatStatusLine(s))
+                              .join(' · ')}
+                          </span>
+                        </div>
+                      ) : null}
+                    {pvpCombat &&
+                      pvpRole &&
+                      (phase === 'pvp_battle_menu' ||
+                        phase === 'pvp_pick_skill' ||
+                        phase === 'pvp_rps') &&
+                      formatEquippedFacetRuntimeSummary(player) && (
+                        <div
+                          className="rpg-statline rpg-pvp-facet-line"
+                          style={{ marginTop: '0.25rem' }}
+                          title="Facet charges on worn gear"
+                        >
+                          <span style={{ flex: 1, fontSize: '0.82rem', opacity: 0.9 }}>
+                            Facets: {formatEquippedFacetRuntimeSummary(player)}
+                          </span>
+                        </div>
+                      )}
                     {player.innates.length > 0 && (
-                      <div className="rpg-innates-row" title="Rolled once at birth; second gift has 0.001% odds.">
+                      <div
+                        className="rpg-innates-row"
+                        title="Birth gifts — flat/% damage, dodge, perfect evade, sanctuary, life steal, thorns, and surge all apply in combat (PvE journal may add matchup text and random REALITY SURGE)."
+                      >
                         Innate{player.innates.length > 1 ? 's' : ''}:{' '}
                         {player.innates.map((id) => (
                           <span key={id} className="rpg-innate-pill" title={INNATE_BY_ID[id]?.description ?? id}>
@@ -2234,7 +2996,10 @@ export default function App() {
                       </div>
                     )}
                     <div className="rpg-skill-tier-row">
-                      <div className="rpg-skill-tier" title="Attack menu lists one skill per equipped piece; stats unlock heavier gear.">
+                      <div
+                        className="rpg-skill-tier"
+                        title="Listed dmg includes level, Striking, innate gifts, stats above gear requirements (overflow bonus), and Battle Might — not enemy matchup or random innate surge."
+                      >
                         Combat skills · from equipped gear (see Equipment)
                       </div>
                     </div>
@@ -2247,10 +3012,46 @@ export default function App() {
                     {(player.inventory.healthPotion > 0 ||
                       player.inventory.manaDraught > 0 ||
                       player.inventory.staminaBrew > 0 ||
+                      player.inventory.sunriseCordial > 0 ||
+                      player.inventory.cleanseScroll > 0 ||
+                      player.inventory.immunePhilter > 0 ||
+                      player.inventory.immuneElixir > 0 ||
+                      player.inventory.mightDraught > 0 ||
+                      player.inventory.prismaticDraught > 0 ||
+                      player.inventory.apexMightDraught > 0 ||
+                      player.inventory.veilPhilter > 0 ||
+                      player.inventory.championCordial > 0 ||
                       Object.keys(player.salvageLoot).length > 0) && (
                         <div className="rpg-pack">
                           Pack: Red ×{player.inventory.healthPotion} · Blue ×{player.inventory.manaDraught} · Green ×
                           {player.inventory.staminaBrew}
+                          {player.inventory.sunriseCordial > 0 && (
+                            <> · Sunrise ×{player.inventory.sunriseCordial}</>
+                          )}
+                          {player.inventory.cleanseScroll > 0 && (
+                            <> · Cleanse ×{player.inventory.cleanseScroll}</>
+                          )}
+                          {player.inventory.immunePhilter > 0 && (
+                            <> · Aegis (5) ×{player.inventory.immunePhilter}</>
+                          )}
+                          {player.inventory.immuneElixir > 0 && (
+                            <> · Aegis (10) ×{player.inventory.immuneElixir}</>
+                          )}
+                          {player.inventory.mightDraught > 0 && (
+                            <> · Might ×{player.inventory.mightDraught}</>
+                          )}
+                          {player.inventory.prismaticDraught > 0 && (
+                            <> · Prism ×{player.inventory.prismaticDraught}</>
+                          )}
+                          {player.inventory.apexMightDraught > 0 && (
+                            <> · Apex ×{player.inventory.apexMightDraught}</>
+                          )}
+                          {player.inventory.veilPhilter > 0 && (
+                            <> · Veil ×{player.inventory.veilPhilter}</>
+                          )}
+                          {player.inventory.championCordial > 0 && (
+                            <> · Champ ×{player.inventory.championCordial}</>
+                          )}
                           {Object.keys(player.salvageLoot).length > 0 && (
                             <>
                               {' '}
@@ -2268,7 +3069,11 @@ export default function App() {
                   <div className="rpg-panel rpg-log-panel">
                     <div className="rpg-log-heading">Journal</div>
                     <div className="rpg-log" ref={logRef}>
-                      {logLines.join('\n')}
+                      {logLines.map((line, i) => (
+                        <p key={i} className={`rpg-log-line ${journalLineModifier(line)}`}>
+                          {line}
+                        </p>
+                      ))}
                     </div>
                   </div>
                 </div>
@@ -2278,7 +3083,11 @@ export default function App() {
                 <div className="rpg-panel rpg-log-panel">
                   <div className="rpg-log-heading">Journal</div>
                   <div className="rpg-log" ref={logRef}>
-                    {logLines.join('\n')}
+                    {logLines.map((line, i) => (
+                      <p key={i} className={`rpg-log-line ${journalLineModifier(line)}`}>
+                        {line}
+                      </p>
+                    ))}
                   </div>
                 </div>
               </aside>
@@ -2293,64 +3102,64 @@ export default function App() {
                   phase !== 'shop' &&
                   phase !== 'gear' &&
                   phase !== 'blacksmith' && (
-                  <div className={`rpg-panel rpg-enemy${enemy.isBoss ? ' rpg-enemy--boss' : ''}`}>
-                    <div className="rpg-statline">
-                      <span>
-                        {enemy.isBoss && <span className="rpg-enemy-boss-tag">Boss</span>}
-                        <strong>{enemy.name}</strong>
-                      </span>
-                      <span className="rpg-loot-tag">
-                        +{enemy.goldReward} <IconCoin size={16} /> · +{enemy.xpReward} XP
-                      </span>
-                    </div>
-                    <div className="rpg-enemy-hp" style={{ marginTop: '0.4rem' }}>
-                      <div className="rpg-enemy-hp-head">
-                        <span className="rpg-enemy-hp-title">HP</span>
-                        <span className="rpg-enemy-hp-values">
-                          <strong>{fmt(battle.enemyHp)}</strong>
-                          <span className="rpg-enemy-hp-sep">/</span>
-                          {fmt(enemy.maxHp)}
+                    <div className={`rpg-panel rpg-enemy${enemy.isBoss ? ' rpg-enemy--boss' : ''}`}>
+                      <div className="rpg-statline">
+                        <span>
+                          {enemy.isBoss && <span className="rpg-enemy-boss-tag">Boss</span>}
+                          <strong>{enemy.name}</strong>
+                        </span>
+                        <span className="rpg-loot-tag">
+                          +{enemy.goldReward} <IconCoin size={16} /> · +{enemy.xpReward} XP
                         </span>
                       </div>
-                      <div
-                        className="rpg-hpbar"
-                        role="progressbar"
-                        aria-valuemin={0}
-                        aria-valuemax={enemy.maxHp}
-                        aria-valuenow={battle.enemyHp}
-                        aria-label={`${enemy.name} hit points`}
-                      >
+                      <div className="rpg-enemy-hp" style={{ marginTop: '0.4rem' }}>
+                        <div className="rpg-enemy-hp-head">
+                          <span className="rpg-enemy-hp-title">HP</span>
+                          <span className="rpg-enemy-hp-values">
+                            <strong>{fmt(battle.enemyHp)}</strong>
+                            <span className="rpg-enemy-hp-sep">/</span>
+                            {fmt(enemy.maxHp)}
+                          </span>
+                        </div>
                         <div
-                          className={`rpg-hpbar__fill rpg-hpbar__fill--${enemy.maxHp <= 0
-                            ? 'mid'
-                            : battle.enemyHp / enemy.maxHp > 0.66
-                              ? 'high'
-                              : battle.enemyHp / enemy.maxHp > 0.33
-                                ? 'mid'
-                                : 'low'
-                            }`}
-                          style={{
-                            width: `${enemy.maxHp > 0 ? Math.max(0, Math.min(100, (battle.enemyHp / enemy.maxHp) * 100)) : 0}%`,
-                          }}
-                        />
+                          className="rpg-hpbar"
+                          role="progressbar"
+                          aria-valuemin={0}
+                          aria-valuemax={enemy.maxHp}
+                          aria-valuenow={battle.enemyHp}
+                          aria-label={`${enemy.name} hit points`}
+                        >
+                          <div
+                            className={`rpg-hpbar__fill rpg-hpbar__fill--${enemy.maxHp <= 0
+                              ? 'mid'
+                              : battle.enemyHp / enemy.maxHp > 0.66
+                                ? 'high'
+                                : battle.enemyHp / enemy.maxHp > 0.33
+                                  ? 'mid'
+                                  : 'low'
+                              }`}
+                            style={{
+                              width: `${enemy.maxHp > 0 ? Math.max(0, Math.min(100, (battle.enemyHp / enemy.maxHp) * 100)) : 0}%`,
+                            }}
+                          />
+                        </div>
                       </div>
-                    </div>
-                    <div className="rpg-statline" style={{ marginTop: '0.35rem' }}>
-                      <span />
-                      <span>
-                        Skill: <strong>{enemy.skill}</strong>
-                      </span>
-                    </div>
-                    {battle.enemyStatuses.length > 0 && (
-                      <div className="rpg-statline" style={{ marginTop: '0.28rem' }} title="Foe effects">
-                        <span style={{ flex: 1, fontSize: '0.88rem', opacity: 0.92 }}>
-                          On foe:{' '}
-                          {battle.enemyStatuses.map((s) => formatStatusLine(s)).join(' · ')}
+                      <div className="rpg-statline" style={{ marginTop: '0.35rem' }}>
+                        <span />
+                        <span>
+                          Skill: <strong>{enemy.skill}</strong>
                         </span>
                       </div>
-                    )}
-                  </div>
-                )}
+                      {battle.enemyStatuses.length > 0 && (
+                        <div className="rpg-statline" style={{ marginTop: '0.28rem' }} title="Foe effects">
+                          <span style={{ flex: 1, fontSize: '0.88rem', opacity: 0.92 }}>
+                            On foe:{' '}
+                            {battle.enemyStatuses.map((s) => formatStatusLine(s)).join(' · ')}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                 {pvpCombat &&
                   pvpRole &&
@@ -2365,10 +3174,12 @@ export default function App() {
                     const oppMax = getMaxStats(oppProf).maxHp
                     const myHp = pvpRole === 'host' ? pvpCombat.hostHp : pvpCombat.guestHp
                     const myMax = getMaxStats(pvpRole === 'host' ? pvpCombat.hostProfile : pvpCombat.guestProfile).maxHp
+                    const oppStatuses =
+                      pvpRole === 'host' ? pvpCombat.guestStatuses : pvpCombat.hostStatuses
                     const ratio = oppMax > 0 ? Math.max(0, Math.min(100, (oppHp / oppMax) * 100)) : 0
                     return (
                       <div
-                        className={`rpg-panel rpg-enemy${pvpHitFlash ? ' rpg-enemy--pvp-hit' : ''}`}
+                        className={`rpg-panel rpg-enemy rpg-enemy--pvp${pvpHitFlash ? ' rpg-enemy--pvp-hit' : ''}`}
                       >
                         <div className="rpg-statline">
                           <span>
@@ -2394,16 +3205,38 @@ export default function App() {
                             aria-label={`${oppProf.name} hit points`}
                           >
                             <div
-                              className={`rpg-hpbar__fill rpg-hpbar__fill--${
-                                ratio > 66 ? 'high' : ratio > 33 ? 'mid' : 'low'
-                              }`}
+                              className={`rpg-hpbar__fill rpg-hpbar__fill--${ratio > 66 ? 'high' : ratio > 33 ? 'mid' : 'low'
+                                }`}
                               style={{ width: `${ratio}%` }}
                             />
                           </div>
                         </div>
-                        <p className="rpg-expedition-hint" style={{ marginTop: '0.45rem' }}>
-                          Your duel HP: {fmt(myHp)} / {fmt(myMax)} — first to {PVP_HP_LOSS_THRESHOLD} HP or below
-                          loses. Clash with R–P–S each exchange; tie → coin flip for strike order.
+                        {oppStatuses && oppStatuses.length > 0 && (
+                          <div className="rpg-statline rpg-pvp-opp-status-line" title="Effects on opponent">
+                            <span style={{ flex: 1, fontSize: '0.88rem', opacity: 0.92 }}>
+                              On them:{' '}
+                              {oppStatuses.map((s) => formatStatusLine(s)).join(' · ')}
+                            </span>
+                          </div>
+                        )}
+                        {(pvpCombat.duelBetGold > 0 || pvpCombat.stripeLoserMode) && (
+                          <p className="rpg-pvp-wager-line">
+                            {pvpCombat.stripeLoserMode && pvpCombat.duelBetGold > 0 && (
+                              <>
+                                Ante {pvpCombat.duelBetGold}g · Stripe loser on — loser forfeits all duel-start gold.
+                              </>
+                            )}
+                            {pvpCombat.stripeLoserMode && pvpCombat.duelBetGold <= 0 && (
+                              <>Stripe loser — loser forfeits all duel-start gold.</>
+                            )}
+                            {!pvpCombat.stripeLoserMode && pvpCombat.duelBetGold > 0 && (
+                              <>Wager: {pvpCombat.duelBetGold}g from loser to winner.</>
+                            )}
+                          </p>
+                        )}
+                        <p className="rpg-pvp-duel-hint">
+                          Your duel HP: {fmt(myHp)} / {fmt(myMax)} — first to {PVP_HP_LOSS_THRESHOLD}{' '}
+                          HP or below loses. Clash with R–P–S each exchange; tie → coin flip for strike order.
                         </p>
                       </div>
                     )
@@ -2537,76 +3370,123 @@ export default function App() {
                       </>
                     )}
                     {showShopUpgrades && filteredShopUpgrades.length > 0 && (
-                      <>
+                      <section className="rpg-upgrade-board" aria-label="Permanent upgrades">
                         {shopStockFilter === 'all' && (
                           <h3 className="rpg-shop-subheading">Permanent upgrades</h3>
                         )}
-                        <div className="rpg-shop-grid">
+                        <p className="rpg-shop-lead rpg-shop-lead--tight">
+                          Stack ranks forever — each tier costs more gold. Applies across every save on this hero.
+                        </p>
+                        <div className="rpg-upgrade-strip" role="list">
                           {filteredShopUpgrades.map((u) => {
                             const rank = player.upgrades[u.id]
                             const price = upgradePrice(u.basePrice, rank)
+                            const affordable = player.gold >= price
                             return (
-                              <div key={u.id} className="rpg-shop-card rpg-shop-card-wide rpg-motion-card">
-                                <ShopIcon kind={u.icon} />
-                                <div className="rpg-shop-card-body">
-                                  <strong>
-                                    {u.name} <span className="rpg-rank">rank {rank}</span>
-                                  </strong>
-                                  <p>{u.description}</p>
-                                  <button type="button" onClick={() => buyUpgrade(u.id)}>
-                                    Upgrade — {price} gold
+                              <article
+                                key={u.id}
+                                className={`rpg-upgrade-card rpg-upgrade-card--${u.id} rpg-motion-card`}
+                                role="listitem"
+                              >
+                                <header className="rpg-upgrade-card__head">
+                                  <span className="rpg-upgrade-card__rank" title="Current rank">
+                                    R{rank}
+                                  </span>
+                                  <div className="rpg-upgrade-card__icon-wrap" aria-hidden>
+                                    <ShopIcon kind={u.icon} size={34} />
+                                  </div>
+                                </header>
+                                <h4 className="rpg-upgrade-card__title">{u.name}</h4>
+                                <p className="rpg-upgrade-card__desc">{u.description}</p>
+                                <div className="rpg-upgrade-card__buy">
+                                  <p className="rpg-upgrade-card__price">
+                                    Next tier{' '}
+                                    <strong>{price}</strong> <IconCoin size={14} />
+                                    {!affordable && (
+                                      <span className="rpg-upgrade-card__short"> · need more gold</span>
+                                    )}
+                                  </p>
+                                  <button
+                                    type="button"
+                                    className="rpg-upgrade-card__cta"
+                                    disabled={!affordable}
+                                    onClick={() => buyUpgrade(u.id)}
+                                  >
+                                    {affordable ? `Upgrade — ${price}g` : `Need ${price}g`}
                                   </button>
                                 </div>
-                              </div>
+                              </article>
                             )
                           })}
                         </div>
-                      </>
+                      </section>
                     )}
                     {showShopStatTomes && filteredShopStatTomes.length > 0 && (
-                      <>
+                      <section className="rpg-stat-tome-board" aria-label="Attribute tomes">
                         {shopStockFilter === 'all' && (
                           <h3 className="rpg-shop-subheading">Attribute tomes</h3>
                         )}
                         <p className="rpg-shop-lead rpg-shop-lead--tight">
-                          Elden-style scaling: each purchase raises one base stat by +1. Cost grows with your current STR /
-                          AGI / INT. Innates still apply on top of these bases.
+                          +1 base stat per tome. Price rises with that stat&apos;s current value — innates apply on top.
                         </p>
-                        <div className="rpg-shop-grid">
+                        <div className="rpg-stat-tome-strip" role="list">
                           {filteredShopStatTomes.map((t) => {
                             const cur = player.stats[t.stat]
                             const price = statTomePrice(cur)
                             const maxed = cur >= MAX_PLAYER_STAT
                             const affordable = player.gold >= price && Number.isFinite(price)
                             const shortStat = t.stat === 'strength' ? 'STR' : t.stat === 'agility' ? 'AGI' : 'INT'
+                            const pct = Math.min(100, Math.round((cur / MAX_PLAYER_STAT) * 100))
                             return (
-                              <div key={t.id} className="rpg-shop-card rpg-shop-card-wide rpg-motion-card">
-                                <ShopIcon kind={t.icon} />
-                                <div className="rpg-shop-card-body">
-                                  <strong>{t.name}</strong>
-                                  <p>{t.description}</p>
-                                  <p className="rpg-gear-req-line">
-                                    {shortStat} now <strong>{cur}</strong> / {MAX_PLAYER_STAT}
-                                    {!maxed && (
-                                      <>
-                                        {' '}
-                                        · next <strong>{price}</strong> <IconCoin size={14} />
-                                      </>
-                                    )}
-                                  </p>
+                              <article
+                                key={t.id}
+                                className={`rpg-stat-tome-card rpg-stat-tome-card--${t.stat} rpg-motion-card`}
+                                role="listitem"
+                              >
+                                <header className="rpg-stat-tome-card__head">
+                                  <span className="rpg-stat-tome-card__badge" aria-hidden>
+                                    {shortStat}
+                                  </span>
+                                  <div className="rpg-stat-tome-card__icon-wrap" aria-hidden>
+                                    <ShopIcon kind={t.icon} size={34} />
+                                  </div>
+                                </header>
+                                <h4 className="rpg-stat-tome-card__title">{t.name}</h4>
+                                <p className="rpg-stat-tome-card__desc">{t.description}</p>
+                                <div className="rpg-stat-tome-card__meter" aria-label={`${shortStat} progress toward cap`}>
+                                  <div className="rpg-stat-tome-meter-track">
+                                    <div className="rpg-stat-tome-meter-fill" style={{ width: `${pct}%` }} />
+                                  </div>
+                                  <span className="rpg-stat-tome-meter-label">
+                                    <strong>{cur}</strong>
+                                    <span className="rpg-stat-tome-meter-sep">/</span>
+                                    {MAX_PLAYER_STAT}
+                                  </span>
+                                </div>
+                                <div className="rpg-stat-tome-card__buy">
+                                  {!maxed && (
+                                    <p className="rpg-stat-tome-card__price">
+                                      Next{' '}
+                                      <strong>{price}</strong> <IconCoin size={14} />
+                                      {!affordable && (
+                                        <span className="rpg-stat-tome-card__short"> · need more gold</span>
+                                      )}
+                                    </p>
+                                  )}
                                   <button
                                     type="button"
+                                    className="rpg-stat-tome-card__cta"
                                     disabled={maxed || !affordable}
                                     onClick={() => buyStatTome(t.id)}
                                   >
-                                    {maxed ? `Max ${shortStat} (${MAX_PLAYER_STAT})` : `Study — ${price} gold`}
+                                    {maxed ? `At cap (${MAX_PLAYER_STAT})` : affordable ? `Study — ${price}g` : `Need ${price}g`}
                                   </button>
                                 </div>
-                              </div>
+                              </article>
                             )
                           })}
                         </div>
-                      </>
+                      </section>
                     )}
                     {!shopHasBuyStock && (
                       <p className="rpg-shop-empty">
@@ -2620,29 +3500,33 @@ export default function App() {
                           Each piece grants one combat skill when worn. Mix slots to shape your kit — main hand and off-hand respect two-handed weapons.
                         </p>
                         <div className="rpg-shop-grid rpg-shop-grid--gear">
-                          {filteredShopGear.map((g) => (
-                            <div key={g.id} className="rpg-shop-card rpg-shop-card--gear rpg-motion-card">
-                              <div className="rpg-shop-card-body">
-                                <strong>{g.name}</strong>
-                                <span className="rpg-gear-slot-pill">
-                                  {EQUIPMENT_SLOT_LABELS[g.slot]}
-                                  {g.twoHanded ? ' · Two-handed' : ''}
-                                </span>
-                                <span className="rpg-gear-archetype-pill" title="Gear kit">
-                                  {GEAR_ARCHETYPE_LABELS[g.archetype]}
-                                </span>
-                                <p>{g.description}</p>
-                                <p className="rpg-gear-req-line">Requires: {formatRequirements(g)}</p>
-                                <p className="rpg-gear-skill-line">
-                                  Skill: <strong>{g.skill.name}</strong> ({fmt(g.skill.damage)} ·{' '}
-                                  {formatSkillResourceDef(g.skill)})
-                                </p>
-                                <button type="button" onClick={() => buyGear(g.id)}>
-                                  Buy — {g.price} gold
-                                </button>
+                          {filteredShopGear.map((g) => {
+                            const mitLine = formatMitigationSummary(g)
+                            return (
+                              <div key={g.id} className="rpg-shop-card rpg-shop-card--gear rpg-motion-card">
+                                <div className="rpg-shop-card-body">
+                                  <strong>{g.name}</strong>
+                                  <span className="rpg-gear-slot-pill">
+                                    {EQUIPMENT_SLOT_LABELS[g.slot]}
+                                    {g.twoHanded ? ' · Two-handed' : ''}
+                                  </span>
+                                  <span className="rpg-gear-archetype-pill" title="Gear kit">
+                                    {GEAR_ARCHETYPE_LABELS[g.archetype]}
+                                  </span>
+                                  <p>{g.description}</p>
+                                  {mitLine ? <p className="rpg-gear-mitigation-line">{mitLine}</p> : null}
+                                  <p className="rpg-gear-req-line">Requires: {formatRequirements(g)}</p>
+                                  <p className="rpg-gear-skill-line">
+                                    Skill: <strong>{g.skill.name}</strong> ({fmt(g.skill.damage)} ·{' '}
+                                    {formatSkillResourceDef(g.skill)})
+                                  </p>
+                                  <button type="button" onClick={() => buyGear(g.id)}>
+                                    Buy — {g.price} gold
+                                  </button>
+                                </div>
                               </div>
-                            </div>
-                          ))}
+                            )
+                          })}
                         </div>
                       </>
                     )}
@@ -2786,7 +3670,7 @@ export default function App() {
                         Nothing here yet — buy gear or wait for drops; junk stacks as salvage (merchant). Sell spares in the shop.
                       </p>
                     ) : (
-                      <ul className="rpg-gear-pack-list">
+                      <ul className="rpg-gear-pack-list rpg-gear-pack-list--cards">
                         {player.gearOwned.map((raw, idx) => {
                           const stack = normalizeGearStack(raw)
                           if (!stack) return null
@@ -2798,26 +3682,44 @@ export default function App() {
                             player.equipment.mainHand &&
                             GEAR_BY_ID[player.equipment.mainHand]?.twoHanded
                           const statBlocked = !playerMeetsStatRequirements(player, g)
+                          const effDmg = getEffectiveSkillDamage(player, g.skill, null, g.id)
+                          const mitLine = formatMitigationSummary(g)
                           return (
-                            <li key={`${stack.gearId}-${idx}`} className="rpg-gear-pack-row">
-                              <div className="rpg-gear-pack-main">
-                                <strong>{g.name}</strong>
-                                <span className="rpg-gear-slot-pill">
-                                  {EQUIPMENT_SLOT_LABELS[g.slot]}
-                                  {g.twoHanded ? ' · 2H' : ''}
-                                </span>
-                                <span className="rpg-gear-archetype-pill" title="Gear kit">
-                                  {GEAR_ARCHETYPE_LABELS[g.archetype]}
-                                </span>
-                                <span className="rpg-gear-pack-dur" title="Durability">
-                                  {' '}
-                                  · {formatDurabilityLine(stack)}
-                                </span>
+                            <li key={`${stack.gearId}-${idx}`} className="rpg-gear-pack-card">
+                              <div className="rpg-gear-pack-card__body">
+                                <header className="rpg-gear-pack-card__head">
+                                  <strong className="rpg-gear-pack-card__title">{g.name}</strong>
+                                  <div className="rpg-gear-pack-card__tags">
+                                    <span className="rpg-gear-slot-pill">
+                                      {EQUIPMENT_SLOT_LABELS[g.slot]}
+                                      {g.twoHanded ? ' · 2H' : ''}
+                                    </span>
+                                    <span className="rpg-gear-archetype-pill" title="Gear kit">
+                                      {GEAR_ARCHETYPE_LABELS[g.archetype]}
+                                    </span>
+                                  </div>
+                                </header>
+                                <p className="rpg-gear-pack-card__dur" title="Durability">
+                                  {formatDurabilityLine(stack)}
+                                </p>
+                                <p className="rpg-gear-pack-card__flavor">{g.description}</p>
+                                {mitLine ? (
+                                  <p className="rpg-gear-mitigation-line rpg-gear-mitigation-line--pack">{mitLine}</p>
+                                ) : null}
+                                <p className="rpg-gear-pack-card__skill rpg-gear-skill-line rpg-gear-skill-line--pack">
+                                  Skill: <strong>{g.skill.name}</strong> ({fmt(effDmg)} dmg ·{' '}
+                                  {formatSkillResourceDef(g.skill)})
+                                  {effDmg !== g.skill.damage && (
+                                    <span className="rpg-gear-pack-base-hint" title="Listed weapon dice before bonuses">
+                                      {' '}
+                                      · base {g.skill.damage}
+                                    </span>
+                                  )}
+                                </p>
                               </div>
-                              <span className="rpg-gear-pack-skill">{g.skill.name}</span>
                               <button
                                 type="button"
-                                className="rpg-tiny"
+                                className="rpg-gear-pack-card__equip"
                                 disabled={!!offBlocked || statBlocked || broken}
                                 title={
                                   broken
@@ -2845,6 +3747,11 @@ export default function App() {
             </div>
           </div>
 
+          <div className="rpg-game-footer-actions">
+            <button type="button" className="rpg-game-settings-link" onClick={() => openSettings('game')}>
+              Settings
+            </button>
+          </div>
           <p className="rpg-meta">Browser RPG — progression auto-saves while you play.</p>
         </div>
       </div>

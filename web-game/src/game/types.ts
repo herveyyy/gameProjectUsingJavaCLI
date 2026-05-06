@@ -6,6 +6,10 @@ export type StatusEffectId =
   | 'stunned'
   | 'shielded'
   | 'empowered'
+  /** Blocks incoming stun effects while turns remain (consumables / buffs). */
+  | 'immune'
+  /** Temporary combat damage bonus — potency holds flat might (e.g. +10). */
+  | 'might'
 
 /** Applied when a skill or enemy hit connects. */
 export interface StatusApply {
@@ -21,6 +25,9 @@ export interface SkillStatusOnHit {
   self?: StatusApply[]
 }
 
+/** Strikes are physical or magical for affinity math (matchups / resist gear). */
+export type DamageKind = 'physical' | 'magical'
+
 export interface SkillDef {
   name: string
   damage: number
@@ -28,6 +35,8 @@ export interface SkillDef {
   manaCost: number
   /** STA spent when greater than zero — stamina-only skills use this with `manaCost: 0`. */
   staminaCost?: number
+  /** Strike element — physical vs magical affinity; inferred from MP/ST balance when omitted. */
+  damageKind?: DamageKind
   /** Optional debuffs/buffs applied when the strike connects. */
   statusOnHit?: SkillStatusOnHit
 }
@@ -43,6 +52,20 @@ export interface PlayerInventory {
   healthPotion: number
   manaDraught: number
   staminaBrew: number
+  cleanseScroll: number
+  immunePhilter: number
+  immuneElixir: number
+  mightDraught: number
+  /** Tri-restore cordial — scales like tonics but splits across HP/MP/STA. */
+  sunriseCordial: number
+  /** Battle — heavy shield + empower. */
+  prismaticDraught: number
+  /** Battle — stronger Battle Might. */
+  apexMightDraught: number
+  /** Battle — mid-duration stun immunity. */
+  veilPhilter: number
+  /** Battle — might + short Aegis. */
+  championCordial: number
 }
 
 export type EquipmentSlotId =
@@ -88,6 +111,35 @@ export interface StatRequirements {
   intelligence?: number
 }
 
+/** Multiplicative mitigation while this piece is equipped (several pieces stack). */
+export interface GearMitigation {
+  /** Damage taken from enemy physical hits (Slime < 1 resists). */
+  physicalTakenMul?: number
+  /** Damage taken from enemy magical hits. */
+  magicalTakenMul?: number
+  /** Ignore stun inflicted by enemies on hit. */
+  stunImmune?: boolean
+}
+
+export type GearFacetKind = 'revive' | 'stun_ward'
+
+/** Limited-use magical facets on gear — charges persist until used or gear removed. */
+export interface GearFacetDef {
+  kind: GearFacetKind
+  /** Max charges for this facet on this piece (revive usually 1; stun ward 3–10 by rarity). */
+  charges: number
+  /** For `revive` facets — fraction of max HP restored (default 0.5). */
+  reviveHpFraction?: number
+}
+
+/** Persisted charges while gear is worn — see {@link GearItemDef.facets}. */
+export interface GearFacetRuntime {
+  revive?: number
+  stunWard?: number
+  /** Max HP fraction for the next revive proc from this slot (from gear def). */
+  reviveHpFrac?: number
+}
+
 /** Static definition — sold in shop; each piece carries one combat skill. */
 export interface GearItemDef {
   id: string
@@ -100,6 +152,10 @@ export interface GearItemDef {
   requirements?: StatRequirements
   /** Occupies main + off hand; off-hand piece is unequipped when set. */
   twoHanded?: boolean
+  /** Passive resistances / immunity while worn. */
+  mitigation?: GearMitigation
+  /** Rare facets — revive once, or stun wards that absorb control effects. */
+  facets?: GearFacetDef[]
 }
 
 export interface PlayerState {
@@ -121,6 +177,8 @@ export interface PlayerState {
   equipment: PlayerEquipment
   /** Current durability for worn pieces (must align with equipment slots that hold gear). */
   equipmentDurability: Partial<Record<EquipmentSlotId, number>>
+  /** Remaining facet procs per slot — keyed same as equipment. */
+  equipmentFacetCharges?: Partial<Record<EquipmentSlotId, GearFacetRuntime>>
   /** Stackable mob salvage — sell-only at the merchant (item id → count). */
   salvageLoot: Record<string, number>
 }
@@ -138,6 +196,14 @@ export interface EnemyState {
   isBoss?: boolean
   /** Statuses applied to the player when this enemy hits (deterministic). */
   playerStatusesOnHit?: StatusApply[]
+  /** Attack flavor — affects how your gear resist applies. Default physical. */
+  attackKind?: DamageKind
+  /** Multiplier on damage you deal with physical skills (matchups). Default 1. */
+  physicalTakenMul?: number
+  /** Multiplier on damage you deal with magical skills. Default 1. */
+  magicalTakenMul?: number
+  /** Ignores on-hit stun from your skills (Visor Bash, etc.). */
+  stunImmune?: boolean
 }
 
 /** Active combat ailments — parallel arrays per combatant in PvE. */
@@ -171,7 +237,19 @@ export type Phase =
   | 'pvp_battle_menu'
   | 'pvp_pick_skill'
 
-export type ShopConsumableId = 'healthPotion' | 'manaDraught' | 'staminaBrew'
+export type ShopConsumableId =
+  | 'healthPotion'
+  | 'manaDraught'
+  | 'staminaBrew'
+  | 'cleanseScroll'
+  | 'immunePhilter'
+  | 'immuneElixir'
+  | 'mightDraught'
+  | 'sunriseCordial'
+  | 'prismaticDraught'
+  | 'apexMightDraught'
+  | 'veilPhilter'
+  | 'championCordial'
 
 export type ShopUpgradeId = keyof PlayerUpgrades
 
@@ -180,7 +258,7 @@ export interface ShopConsumableDef {
   name: string
   description: string
   price: number
-  icon: 'potion' | 'vial' | 'leaf'
+  icon: 'potion' | 'vial' | 'leaf' | 'scroll' | 'shield' | 'star'
 }
 
 export interface ShopUpgradeDef {

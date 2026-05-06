@@ -1,4 +1,5 @@
 import { MAX_PLAYER_STAT } from './constants'
+import { sanitizeEquipmentFacetCharges } from './facets'
 import { emptyPlayerEquipment, maxDurabilityForGearId, normalizeGearStack } from './gear'
 import { INNATE_BY_ID } from './innates'
 import { applyMaxCaps } from './progression'
@@ -29,13 +30,49 @@ export interface SavePayloadV2 {
   slots: (PlayerState | null)[]
 }
 
+function normalizeInventory(raw: unknown): PlayerInventory {
+  const z = (n: unknown) =>
+    typeof n === 'number' && Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0
+  if (!raw || typeof raw !== 'object') {
+    return {
+      healthPotion: 0,
+      manaDraught: 0,
+      staminaBrew: 0,
+      cleanseScroll: 0,
+      immunePhilter: 0,
+      immuneElixir: 0,
+      mightDraught: 0,
+      sunriseCordial: 0,
+      prismaticDraught: 0,
+      apexMightDraught: 0,
+      veilPhilter: 0,
+      championCordial: 0,
+    }
+  }
+  const o = raw as Record<string, unknown>
+  return {
+    healthPotion: z(o.healthPotion),
+    manaDraught: z(o.manaDraught),
+    staminaBrew: z(o.staminaBrew),
+    cleanseScroll: z(o.cleanseScroll),
+    immunePhilter: z(o.immunePhilter),
+    immuneElixir: z(o.immuneElixir),
+    mightDraught: z(o.mightDraught),
+    sunriseCordial: z(o.sunriseCordial),
+    prismaticDraught: z(o.prismaticDraught),
+    apexMightDraught: z(o.apexMightDraught),
+    veilPhilter: z(o.veilPhilter),
+    championCordial: z(o.championCordial),
+  }
+}
+
 function isInventory(x: unknown): x is PlayerInventory {
   if (!x || typeof x !== 'object') return false
-  const o = x as Record<string, unknown>
+  const n = normalizeInventory(x)
   return (
-    typeof o.healthPotion === 'number' &&
-    typeof o.manaDraught === 'number' &&
-    typeof o.staminaBrew === 'number'
+    typeof n.healthPotion === 'number' &&
+    typeof n.manaDraught === 'number' &&
+    typeof n.staminaBrew === 'number'
   )
 }
 
@@ -128,6 +165,8 @@ function migratePlayerShape(raw: unknown): unknown {
     .map((row) => normalizeGearStack(row))
     .filter((s): s is GearStack => s != null)
 
+  next.inventory = normalizeInventory(next.inventory)
+
   if (!isSalvageLoot(next.salvageLoot)) {
     next.salvageLoot = {}
   }
@@ -151,6 +190,14 @@ function migratePlayerShape(raw: unknown): unknown {
     }
   }
   next.equipmentDurability = ed
+
+  if (!next.equipmentFacetCharges || typeof next.equipmentFacetCharges !== 'object') {
+    next.equipmentFacetCharges = {}
+  }
+  {
+    const fixed = sanitizeEquipmentFacetCharges({ ...(next as unknown as PlayerState) })
+    next.equipmentFacetCharges = fixed.equipmentFacetCharges
+  }
 
   if (!Array.isArray(next.innates)) {
     next.innates = []

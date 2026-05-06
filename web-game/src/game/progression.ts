@@ -17,10 +17,12 @@ import {
   newGearStack,
   normalizeGearStack,
   repairCostForStack,
+  statOverflowDamageMultiplier,
 } from './gear'
 import { SALVAGE_BY_ID } from './salvage'
 import { applyInnateDamageBonuses } from './innates'
 import type {
+  CombatStatusEntry,
   EquipmentSlotId,
   PlayerState,
   ShopConsumableId,
@@ -49,11 +51,24 @@ export function getMaxStats(player: PlayerState): MaxStats {
   }
 }
 
-/** Striking upgrade + light level scaling + innate flat/% damage gifts. */
-export function getEffectiveSkillDamage(player: PlayerState, skill: SkillDef): number {
+/** Striking upgrade + level scaling + innates + Battle Might + gear stat overflow (effective stats above reqs). */
+export function getEffectiveSkillDamage(
+  player: PlayerState,
+  skill: SkillDef,
+  combatStatuses?: CombatStatusEntry[] | null,
+  /** Gear that supplies this skill — overflow uses its requirement thresholds; omit for intrinsic bare strike. */
+  skillSourceGearId?: string | null,
+): number {
   const levelMul = 1 + (player.level - 1) * 0.022
   let raw = skill.damage * levelMul + player.upgrades.striking
   raw = applyInnateDamageBonuses(player, raw)
+  if (combatStatuses?.length) {
+    for (const s of combatStatuses) {
+      if (s.id === 'might' && s.turns > 0) raw += s.potency ?? 0
+    }
+  }
+  const gearDef = skillSourceGearId ? GEAR_BY_ID[skillSourceGearId] : undefined
+  raw *= statOverflowDamageMultiplier(player, gearDef)
   return Math.max(0, Math.floor(raw))
 }
 
@@ -275,32 +290,153 @@ export function tryBuyUpgrade(player: PlayerState, id: ShopUpgradeId): PlayerSta
   return applyMaxCaps(next)
 }
 
+/** HP restored by one Red Tonic — scales with Vitality training and max HP pool. */
+export function getHealthPotionHeal(player: PlayerState): number {
+  const vit = player.upgrades.vitality
+  const maxHp = getMaxStats(player).maxHp
+  const linear = 48 + vit * 12
+  const scaled = Math.floor(maxHp * (0.024 + vit * 0.005))
+  return Math.max(1, linear + scaled)
+}
+
+/** MP restored by one Blue Tonic — scales with Arcana and max mana. */
+export function getManaDraughtRestore(player: PlayerState): number {
+  const arc = player.upgrades.arcana
+  const maxMana = getMaxStats(player).maxMana
+  const linear = 42 + arc * 11
+  const scaled = Math.floor(maxMana * (0.024 + arc * 0.005))
+  return Math.max(1, linear + scaled)
+}
+
+/** STA restored by one Green Tonic — scales with Endurance and max stamina. */
+export function getStaminaBrewRestore(player: PlayerState): number {
+  const end = player.upgrades.endurance
+  const maxSta = getMaxStats(player).maxStamina
+  const linear = 36 + end * 11
+  const scaled = Math.floor(maxSta * (0.024 + end * 0.005))
+  return Math.max(1, linear + scaled)
+}
+
+/** Premium cordial — restores each pool by ~58% of what matching tonic would (one inventory slot). */
+export function getSunriseCordialRestore(player: PlayerState): {
+  hp: number
+  mana: number
+  stamina: number
+} {
+  const frac = 0.58
+  return {
+    hp: Math.max(1, Math.floor(getHealthPotionHeal(player) * frac)),
+    mana: Math.max(1, Math.floor(getManaDraughtRestore(player) * frac)),
+    stamina: Math.max(1, Math.floor(getStaminaBrewRestore(player) * frac)),
+  }
+}
+
 export function tryUseHealthPotion(player: PlayerState): PlayerState | null {
   if (player.inventory.healthPotion < 1) return null
   const max = getMaxStats(player).maxHp
+  const heal = getHealthPotionHeal(player)
   return applyMaxCaps({
     ...player,
     inventory: { ...player.inventory, healthPotion: player.inventory.healthPotion - 1 },
-    hp: Math.min(max, player.hp + 40),
+    hp: Math.min(max, player.hp + heal),
   })
 }
 
 export function tryUseManaDraught(player: PlayerState): PlayerState | null {
   if (player.inventory.manaDraught < 1) return null
   const max = getMaxStats(player).maxMana
+  const amt = getManaDraughtRestore(player)
   return applyMaxCaps({
     ...player,
     inventory: { ...player.inventory, manaDraught: player.inventory.manaDraught - 1 },
-    mana: Math.min(max, player.mana + 35),
+    mana: Math.min(max, player.mana + amt),
   })
 }
 
 export function tryUseStaminaBrew(player: PlayerState): PlayerState | null {
   if (player.inventory.staminaBrew < 1) return null
   const max = getMaxStats(player).maxStamina
+  const amt = getStaminaBrewRestore(player)
   return applyMaxCaps({
     ...player,
     inventory: { ...player.inventory, staminaBrew: player.inventory.staminaBrew - 1 },
-    stamina: Math.min(max, player.stamina + 30),
+    stamina: Math.min(max, player.stamina + amt),
+  })
+}
+
+export function tryConsumeCleanseScroll(player: PlayerState): PlayerState | null {
+  if (player.inventory.cleanseScroll < 1) return null
+  return applyMaxCaps({
+    ...player,
+    inventory: { ...player.inventory, cleanseScroll: player.inventory.cleanseScroll - 1 },
+  })
+}
+
+export function tryConsumeImmunePhilter(player: PlayerState): PlayerState | null {
+  if (player.inventory.immunePhilter < 1) return null
+  return applyMaxCaps({
+    ...player,
+    inventory: { ...player.inventory, immunePhilter: player.inventory.immunePhilter - 1 },
+  })
+}
+
+export function tryConsumeImmuneElixir(player: PlayerState): PlayerState | null {
+  if (player.inventory.immuneElixir < 1) return null
+  return applyMaxCaps({
+    ...player,
+    inventory: { ...player.inventory, immuneElixir: player.inventory.immuneElixir - 1 },
+  })
+}
+
+export function tryConsumeMightDraught(player: PlayerState): PlayerState | null {
+  if (player.inventory.mightDraught < 1) return null
+  return applyMaxCaps({
+    ...player,
+    inventory: { ...player.inventory, mightDraught: player.inventory.mightDraught - 1 },
+  })
+}
+
+export function tryUseSunriseCordial(player: PlayerState): PlayerState | null {
+  if (player.inventory.sunriseCordial < 1) return null
+  const max = getMaxStats(player)
+  const r = getSunriseCordialRestore(player)
+  return applyMaxCaps({
+    ...player,
+    inventory: { ...player.inventory, sunriseCordial: player.inventory.sunriseCordial - 1 },
+    hp: Math.min(max.maxHp, player.hp + r.hp),
+    mana: Math.min(max.maxMana, player.mana + r.mana),
+    stamina: Math.min(max.maxStamina, player.stamina + r.stamina),
+  })
+}
+
+export function tryConsumePrismaticDraught(player: PlayerState): PlayerState | null {
+  if (player.inventory.prismaticDraught < 1) return null
+  return applyMaxCaps({
+    ...player,
+    inventory: { ...player.inventory, prismaticDraught: player.inventory.prismaticDraught - 1 },
+  })
+}
+
+export function tryConsumeApexMightDraught(player: PlayerState): PlayerState | null {
+  if (player.inventory.apexMightDraught < 1) return null
+  return applyMaxCaps({
+    ...player,
+    inventory: { ...player.inventory, apexMightDraught: player.inventory.apexMightDraught - 1 },
+  })
+}
+
+export function tryConsumeVeilPhilter(player: PlayerState): PlayerState | null {
+  if (player.inventory.veilPhilter < 1) return null
+  return applyMaxCaps({
+    ...player,
+    inventory: { ...player.inventory, veilPhilter: player.inventory.veilPhilter - 1 },
+  })
+}
+
+export function tryConsumeChampionCordial(player: PlayerState): PlayerState | null {
+  if (player.inventory.championCordial < 1) return null
+  return applyMaxCaps({
+    ...player,
+    inventory: { ...player.inventory, championCordial: player.inventory.championCordial - 1 },
   })
 }

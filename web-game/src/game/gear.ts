@@ -1,8 +1,10 @@
+import { syncEquipmentFacetCharges } from './facets'
 import { getEffectiveStats } from './innates'
 import type {
   EquipmentSlotId,
   GearArchetypeId,
   GearItemDef,
+  GearMitigation,
   GearStack,
   PlayerEquipment,
   PlayerState,
@@ -10,7 +12,12 @@ import type {
 } from './types'
 
 /** When nothing equipped grants a combat skill — keeps early fights possible. */
-export const BARE_STRIKE_SKILL: SkillDef = { name: 'Bare strike', damage: 2, manaCost: 0 }
+export const BARE_STRIKE_SKILL: SkillDef = {
+  name: 'Bare strike',
+  damage: 2,
+  manaCost: 0,
+  damageKind: 'physical',
+}
 
 /** Display / combat order: jewelry & armor first, weapons last. */
 export const COMBAT_GEAR_SLOT_ORDER: readonly EquipmentSlotId[] = [
@@ -86,6 +93,7 @@ export const GEAR_CATALOG: readonly GearItemDef[] = [
     name: 'Iron Barbute',
     slot: 'head',
     description: 'Heavy visor; bashers train strikes through the helm.',
+    mitigation: { physicalTakenMul: 0.92, stunImmune: true },
     price: 55,
     requirements: { strength: 5 },
     skill: {
@@ -102,6 +110,7 @@ export const GEAR_CATALOG: readonly GearItemDef[] = [
     name: 'Circlet of Whispers',
     slot: 'head',
     description: 'Thin silver band humming with wind cantrips.',
+    facets: [{ kind: 'stun_ward', charges: 10 }],
     price: 42,
     requirements: { intelligence: 4 },
     skill: {
@@ -117,6 +126,7 @@ export const GEAR_CATALOG: readonly GearItemDef[] = [
     name: 'Pearl Droplets',
     slot: 'ears',
     description: 'Catch sound and throw it back as pain.',
+    mitigation: { magicalTakenMul: 0.97 },
     price: 28,
     requirements: { agility: 2 },
     skill: { name: 'Echo Pin', damage: 5, manaCost: 5 },
@@ -137,6 +147,8 @@ export const GEAR_CATALOG: readonly GearItemDef[] = [
     name: 'Chain Gorget',
     slot: 'neck',
     description: 'Protects the throat; doubles as a taught cord strike.',
+    mitigation: { physicalTakenMul: 0.96 },
+    facets: [{ kind: 'stun_ward', charges: 5 }],
     price: 32,
     requirements: { strength: 3 },
     skill: { name: 'Choker Snap', damage: 6, manaCost: 0, staminaCost: 4 },
@@ -147,6 +159,7 @@ export const GEAR_CATALOG: readonly GearItemDef[] = [
     name: 'Ember Amulet',
     slot: 'neck',
     description: 'Warm coal shard on a bronze chain.',
+    facets: [{ kind: 'revive', charges: 1, reviveHpFraction: 0.62 }],
     price: 48,
     requirements: { intelligence: 5 },
     skill: {
@@ -202,6 +215,7 @@ export const GEAR_CATALOG: readonly GearItemDef[] = [
     name: 'Traveler Cloak',
     slot: 'back',
     description: 'Thick wool — good for hiding a spinning reprisal.',
+    mitigation: { magicalTakenMul: 0.94 },
     price: 30,
     requirements: { agility: 2 },
     skill: { name: 'Cloak Reversal', damage: 6, manaCost: 0, staminaCost: 5 },
@@ -222,6 +236,7 @@ export const GEAR_CATALOG: readonly GearItemDef[] = [
     name: 'Stitched Leggings',
     slot: 'legs',
     description: 'Double seams — kick templates woven in.',
+    mitigation: { physicalTakenMul: 0.98 },
     price: 26,
     requirements: { agility: 2 },
     skill: { name: 'Low Sweep', damage: 5, manaCost: 0, staminaCost: 4 },
@@ -242,6 +257,8 @@ export const GEAR_CATALOG: readonly GearItemDef[] = [
     name: 'Wander Boots',
     slot: 'feet',
     description: 'Soft soles, sudden sprint.',
+    mitigation: { physicalTakenMul: 0.99 },
+    facets: [{ kind: 'revive', charges: 1, reviveHpFraction: 0.55 }],
     price: 24,
     requirements: { agility: 2 },
     skill: { name: 'Dust Kick', damage: 4, manaCost: 0, staminaCost: 3 },
@@ -264,7 +281,13 @@ export const GEAR_CATALOG: readonly GearItemDef[] = [
     description: 'Fast steel for one hand.',
     price: 44,
     requirements: { strength: 4, agility: 3 },
-    skill: { name: 'Quick Pierce', damage: 11, manaCost: 0, staminaCost: 8 },
+    skill: {
+      name: 'Quick Pierce',
+      damage: 11,
+      manaCost: 0,
+      staminaCost: 8,
+      statusOnHit: { target: [{ id: 'poisoned', turns: 3, potency: 3 }] },
+    },
   },
   {
     id: 'gear_greatsword_oath',
@@ -770,6 +793,118 @@ export const GEAR_CATALOG: readonly GearItemDef[] = [
     skill: { name: 'Paper Burn', damage: 14, manaCost: 13 },
   },
   {
+    id: 'gear_diadem_solaris',
+    archetype: 'hybrid',
+    name: 'Solaris Diadem',
+    slot: 'head',
+    description: 'Coronal glass — daylight remembers your pulse.',
+    facets: [
+      { kind: 'revive', charges: 1, reviveHpFraction: 0.72 },
+      { kind: 'stun_ward', charges: 9 },
+    ],
+    mitigation: { physicalTakenMul: 0.91, magicalTakenMul: 0.9 },
+    price: 188,
+    requirements: { strength: 8, agility: 8, intelligence: 8 },
+    skill: {
+      name: 'Corona Spill',
+      damage: 16,
+      manaCost: 12,
+      staminaCost: 6,
+      statusOnHit: { target: [{ id: 'burning', turns: 2, potency: 5 }] },
+    },
+  },
+  {
+    id: 'gear_earcuff_resonance',
+    archetype: 'mage',
+    name: 'Resonance Earcuff',
+    slot: 'ears',
+    description: 'Hum-canceling silver — hostile cantrips slide off.',
+    facets: [{ kind: 'stun_ward', charges: 15 }],
+    mitigation: { magicalTakenMul: 0.94 },
+    price: 94,
+    requirements: { intelligence: 8 },
+    skill: { name: 'Echo Hex', damage: 13, manaCost: 11 },
+  },
+  {
+    id: 'gear_torque_secondheart',
+    archetype: 'warrior',
+    name: 'Torque of Second Heart',
+    slot: 'neck',
+    description: 'Bronze serpent biting its tail — stubborn circulation.',
+    facets: [{ kind: 'revive', charges: 1, reviveHpFraction: 0.68 }],
+    mitigation: { physicalTakenMul: 0.94 },
+    price: 118,
+    requirements: { strength: 9 },
+    skill: { name: 'Pulse Hook', damage: 13, manaCost: 0, staminaCost: 9 },
+  },
+  {
+    id: 'gear_mail_spellguard',
+    archetype: 'mage',
+    name: 'Spellguard Mailshirt',
+    slot: 'body',
+    description: 'Runes knitted through steel wire — controls fray at the ribs.',
+    facets: [{ kind: 'stun_ward', charges: 12 }],
+    mitigation: { physicalTakenMul: 0.88, magicalTakenMul: 0.85 },
+    price: 162,
+    requirements: { intelligence: 10 },
+    skill: {
+      name: 'Glyph Rebuke',
+      damage: 17,
+      manaCost: 14,
+      statusOnHit: { target: [{ id: 'chilled', turns: 2, potency: 3 }] },
+    },
+  },
+  {
+    id: 'gear_gloves_sigilthread',
+    archetype: 'hybrid',
+    name: 'Sigilthread Gloves',
+    slot: 'hands',
+    description: 'Each fingertip inked with a different argument.',
+    facets: [{ kind: 'stun_ward', charges: 10 }],
+    price: 102,
+    requirements: { agility: 8, intelligence: 7 },
+    skill: { name: 'Thread Snare', damage: 15, manaCost: 10, staminaCost: 5 },
+  },
+  {
+    id: 'gear_cloak_twilight',
+    archetype: 'rogue',
+    name: 'Twilight Obligation Cloak',
+    slot: 'back',
+    description: 'Tailors swear the lining drinks footsteps.',
+    facets: [
+      { kind: 'revive', charges: 1, reviveHpFraction: 0.58 },
+      { kind: 'stun_ward', charges: 8 },
+    ],
+    mitigation: { physicalTakenMul: 0.93 },
+    price: 142,
+    requirements: { agility: 9 },
+    skill: { name: 'Obligation Cut', damage: 14, manaCost: 0, staminaCost: 10 },
+  },
+  {
+    id: 'gear_sandals_oracle',
+    archetype: 'mage',
+    name: 'Oracle Sandals',
+    slot: 'feet',
+    description: 'Glass soles — you always know where not to stand.',
+    facets: [{ kind: 'stun_ward', charges: 18 }],
+    mitigation: { magicalTakenMul: 0.93 },
+    price: 90,
+    requirements: { intelligence: 8 },
+    skill: { name: 'Glass Step', damage: 12, manaCost: 9 },
+  },
+  {
+    id: 'gear_buckler_facetguard',
+    archetype: 'warrior',
+    name: 'Facetguard Buckler',
+    slot: 'offHand',
+    description: 'Mirrored boss catches verdicts before they land.',
+    facets: [{ kind: 'revive', charges: 1, reviveHpFraction: 0.55 }],
+    mitigation: { physicalTakenMul: 0.92 },
+    price: 79,
+    requirements: { strength: 8 },
+    skill: { name: 'Facet Bash', damage: 12, manaCost: 0, staminaCost: 8 },
+  },
+  {
     id: 'gear_mystic_veilrod',
     archetype: 'mystic',
     name: 'Veilthread Rod',
@@ -912,6 +1047,22 @@ export function playerMeetsStatRequirements(player: PlayerState, def: GearItemDe
   return true
 }
 
+/**
+ * Damage multiplier when your effective STR/AGI/INT exceed this piece’s requirement thresholds.
+ * Sum of (current − required) across each listed requirement; intrinsic / no reqs stays 1.0.
+ */
+export function statOverflowDamageMultiplier(player: PlayerState, def: GearItemDef | null | undefined): number {
+  if (!def?.requirements) return 1
+  const r = def.requirements
+  const st = getEffectiveStats(player)
+  let overflow = 0
+  if (r.strength != null) overflow += Math.max(0, st.strength - r.strength)
+  if (r.agility != null) overflow += Math.max(0, st.agility - r.agility)
+  if (r.intelligence != null) overflow += Math.max(0, st.intelligence - r.intelligence)
+  if (overflow <= 0) return 1
+  return 1 + Math.min(0.28, overflow * 0.011)
+}
+
 /** Human-readable requirement line for UI (shop / errors). */
 export function formatRequirements(def: GearItemDef): string {
   const r = def.requirements
@@ -921,6 +1072,119 @@ export function formatRequirements(def: GearItemDef): string {
   if (r.agility != null) parts.push(`AGI ${r.agility}`)
   if (r.intelligence != null) parts.push(`INT ${r.intelligence}`)
   return parts.length ? parts.join(' · ') : 'No stat requirement'
+}
+
+/** How much this slot contributes to passive mitigation before price tier (body = full “plate” budget). */
+const SLOT_MIT_WEIGHT: Record<EquipmentSlotId, number> = {
+  body: 1,
+  head: 0.72,
+  legs: 0.66,
+  feet: 0.44,
+  hands: 0.38,
+  back: 0.52,
+  neck: 0.34,
+  ears: 0.26,
+  mainHand: 0.14,
+  offHand: 0.58,
+}
+
+function clampMitigationMul(x: number): number {
+  return Math.min(0.996, Math.max(0.865, x))
+}
+
+/**
+ * Baseline physical/magic damage taken multipliers for gear without authored mitigation.
+ * Scales slightly with price (tier); archetype biases warrior→phys, mage→magic, etc.
+ */
+function inferMitigationDefaults(def: GearItemDef): GearMitigation {
+  const tier = Math.min(1, def.price / 105)
+  const w = SLOT_MIT_WEIGHT[def.slot] ?? 0.45
+  const magnitude = (0.028 + tier * 0.078) * w
+
+  let physAmt = 0
+  let magAmt = 0
+  switch (def.archetype) {
+    case 'warrior':
+      physAmt = magnitude * 1.28
+      magAmt = magnitude * 0.22
+      break
+    case 'mage':
+      physAmt = magnitude * 0.26
+      magAmt = magnitude * 1.22
+      break
+    case 'rogue':
+      physAmt = magnitude * 0.82
+      magAmt = magnitude * 0.42
+      break
+    case 'hybrid':
+      physAmt = magnitude * 0.72
+      magAmt = magnitude * 0.68
+      break
+    case 'mystic':
+      physAmt = magnitude * 0.58
+      magAmt = magnitude * 0.62
+      break
+    case 'legend':
+      physAmt = magnitude * 0.95
+      magAmt = magnitude * 0.88
+      break
+    default:
+      physAmt = magnitude * 0.65
+      magAmt = magnitude * 0.55
+  }
+
+  if (def.slot === 'mainHand') {
+    physAmt *= 0.32
+    magAmt *= 0.32
+  }
+
+  const physicalTakenMul = clampMitigationMul(1 - Math.min(0.13, physAmt))
+  const magicalTakenMul = clampMitigationMul(1 - Math.min(0.13, magAmt))
+  return { physicalTakenMul, magicalTakenMul }
+}
+
+/** Effective mitigation for combat + UI — merges catalog values with inferred defaults per slot. */
+export function resolveGearMitigation(def: GearItemDef): GearMitigation {
+  const inferred = inferMitigationDefaults(def)
+  const ex = def.mitigation
+  if (!ex) return inferred
+  return {
+    physicalTakenMul: ex.physicalTakenMul ?? inferred.physicalTakenMul,
+    magicalTakenMul: ex.magicalTakenMul ?? inferred.magicalTakenMul,
+    stunImmune: ex.stunImmune ?? inferred.stunImmune,
+  }
+}
+
+/** Passive resist line for shop / inspect UI. */
+export function formatFacetSummary(def: GearItemDef): string | null {
+  if (!def.facets?.length) return null
+  const parts: string[] = []
+  for (const f of def.facets) {
+    if (f.kind === 'revive') {
+      const pct = Math.round((f.reviveHpFraction ?? 0.5) * 100)
+      parts.push(`Revive facet (${f.charges}× · ~${pct}% HP)`)
+    } else if (f.kind === 'stun_ward') parts.push(`Stun Ward (${f.charges} charges)`)
+  }
+  return parts.length ? parts.join(' · ') : null
+}
+
+export function formatMitigationSummary(def: GearItemDef): string | null {
+  const m = resolveGearMitigation(def)
+  const parts: string[] = []
+  if (m.physicalTakenMul != null && m.physicalTakenMul !== 1) {
+    const delta = Math.round((1 - m.physicalTakenMul) * 100)
+    if (delta > 0) parts.push(`${delta}% less physical taken`)
+    else if (delta < 0) parts.push(`${-delta}% more physical taken`)
+  }
+  if (m.magicalTakenMul != null && m.magicalTakenMul !== 1) {
+    const delta = Math.round((1 - m.magicalTakenMul) * 100)
+    if (delta > 0) parts.push(`${delta}% less magic taken`)
+    else if (delta < 0) parts.push(`${-delta}% more magic taken`)
+  }
+  if (m.stunImmune) parts.push('Stun immune (enemy hits)')
+  const facetLine = formatFacetSummary(def)
+  if (facetLine) parts.push(facetLine)
+  return parts.length ? parts.join(' · ') : null
 }
 
 export function describeEquipBlock(player: PlayerState, packIndex: number): string | null {
@@ -950,12 +1214,13 @@ export function tryUnequipSlot(player: PlayerState, slot: EquipmentSlotId): Play
   const stack: GearStack = { gearId: id, durability: d }
   const equipmentDurability = { ...player.equipmentDurability }
   delete equipmentDurability[slot]
-  return {
+  const nextState: PlayerState = {
     ...player,
     equipment: { ...player.equipment, [slot]: null },
     gearOwned: [...player.gearOwned, stack],
     equipmentDurability,
   }
+  return syncEquipmentFacetCharges(player, nextState)
 }
 
 export function tryEquipFromBag(player: PlayerState, packIndex: number): PlayerState | null {
@@ -993,12 +1258,13 @@ export function tryEquipFromBag(player: PlayerState, packIndex: number): PlayerS
 
   const gearOwned = player.gearOwned.filter((_, i) => i !== packIndex)
 
-  return {
+  const nextState: PlayerState = {
     ...player,
     equipment,
     equipmentDurability,
     gearOwned: [...gearOwned, ...bumped],
   }
+  return syncEquipmentFacetCharges(player, nextState)
 }
 
 function collectGearCombatSkills(player: PlayerState): CombatSkillEntry[] {

@@ -1,0 +1,720 @@
+/*
+ * Traveler's Grimoire — skeuomorphic journal / parchment
+ * document.documentElement[data-theme="grimoire"]
+ */
+
+[data-theme='grimoire'] {
+  --g-parchment: #f4ebd8;
+  --g-parchment-dim: #e8dbc3;
+  --g-surface: #fff8f7;
+  --g-surface-container: #fdeae7;
+  --g-surface-container-high: #f7e4e2;
+  --g-on-surface: #231918;
+  --g-on-surface-variant: #564240;
+  --g-ink: #2b2620;
+  --g-faded-ink: #7a6f5d;
+  --g-primary: #6c1b18;
+  --g-on-primary: #ffffff;
+  --g-primary-container: #8b322c;
+  --g-secondary-container: #fed65b;
+  --g-on-secondary-container: #745c00;
+  --g-tertiary: #00413b;
+  --g-on-tertiary-container: #88cfc4;
+  --g-outline: #89726f;
+  --g-outline-variant: #dcc0bd;
+  --g-accent: #d4af37;
+  --g-shadow-paper: 2px 4px 12px rgba(43, 38, 32, 0.18);
+  --g-shadow-soft: 0 4px 6px rgba(43, 38, 32, 0.12);
+  --g-border: 2px solid var(--g-ink);
+  --g-radius: 3px;
+  --g-font-display: 'IM Fell English SC', 'Times New Roman', serif;
+  --g-font-body: 'EB Garamond', 'Palatino Linotype', serif;
+  --g-font-script: 'Caveat', cursive;
+  --g-font-ui: 'IM Fell English', 'Times New Roman', serif;
+}
+
+[data-theme='grimoire'] html,
+[data-theme='grimoire'] body,
+[data-theme='grimoire'] #root {
+  background-color: var(--g-parchment);
+  color: var(--g-on-surface);
+}
+
+[data-theme='grimoire'] .rpg-shell {
+  font-family: var(--g-font-body);
+  font-size: 1.0625rem;
+  font-weight: 500;
+  line-height: 1.55;
+  color: var(--g-ink);
+  background: var(--g-parchment);
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+[data-theme='grimoire'] .rpg-shell::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.045;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  z-index: 0;
+}
+
+/* Stack content above noise layer — do NOT include .rpg-fs-btn or it overrides position:absolute (top-right). */
+[data-theme='grimoire'] .rpg-shell > *:not(.rpg-fs-btn) {
+  position: relative;
+  z-index: 1;
+}
+
+[data-theme='grimoire'] .rpg-shell h1,
+[data-theme='grimoire'] .rpg-shell h2,
+[data-theme='grimoire'] .rpg-shell h3,
+[data-theme='grimoire'] .rpg-hud-title h1,
+[data-theme='grimoire'] .rpg-shop-heading,
+[data-theme='grimoire'] .rpg-places-heading {
+  font-family: var(--g-font-display);
+  font-weight: 400;
+  letter-spacing: 0.02em;
+}
+
+[data-theme='grimoire'] .rpg-shell h1 {
+  background: var(--g-surface-container);
+  border: var(--g-border);
+  border-radius: var(--g-radius);
+  box-shadow: var(--g-shadow-paper);
+  color: var(--g-primary);
+  padding: 0.45rem 0.75rem;
+}
+
+[data-theme='grimoire'] .rpg-panel {
+  border: var(--g-border);
+  border-radius: var(--g-radius);
+  background: var(--g-surface-container);
+  box-shadow: var(--g-shadow-paper);
+}
+
+[data-theme='grimoire'] .rpg-panel:nth-of-type(2n) {
+  background: var(--g-surface-container-high);
+}
+
+[data-theme='grimoire'] .rpg-log-panel {
+  background: var(--g-parchment-dim);
+  border-radius: var(--g-radius);
+  box-shadow: var(--g-shadow-paper);
+}
+
+[data-theme='grimoire'] .rpg-log-heading {
+  font-family: var(--g-font-display);
+  font-weight: 400;
+  color: var(--g-faded-ink);
+}
+
+[data-theme='grimoire'] .rpg-log {
+  font-family: var(--g-font-script);
+  font-size: 1.2rem;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--g-ink);
+  background: var(--g-surface);
+  border: var(--g-border);
+  border-radius: var(--g-radius);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+[data-theme='grimoire'] .rpg-log-line {
+  font-family: var(--g-font-body);
+  font-size: 1.05rem;
+  border-left-width: 4px;
+}
+
+[data-theme='grimoire'] .rpg-log-line--narration {
+  border-left-color: var(--g-outline-variant);
+  color: var(--g-on-surface-variant);
+}
+
+[data-theme='grimoire'] .rpg-log-line--voice {
+  border-left-color: var(--g-primary);
+  color: var(--g-primary);
+}
+
+[data-theme='grimoire'] .rpg-log-line--intro,
+[data-theme='grimoire'] .rpg-log-line--greet {
+  border-left-color: var(--g-tertiary);
+  color: var(--g-tertiary);
+}
+
+[data-theme='grimoire'] .rpg-log-line--gift,
+[data-theme='grimoire'] .rpg-log-line--rare {
+  border-left-color: var(--g-accent);
+  color: var(--g-primary-container);
+}
+
+[data-theme='grimoire'] .rpg-log-line--foe {
+  border-left-color: #b45309;
+  color: #7c2d12;
+}
+
+[data-theme='grimoire'] .rpg-log-line--travel {
+  border-left-color: var(--g-tertiary);
+  color: #0f766e;
+}
+
+[data-theme='grimoire'] .rpg-log-line--prompt {
+  border-left-color: var(--g-secondary-container);
+  color: var(--g-on-secondary-container);
+}
+
+[data-theme='grimoire'] .rpg-log-line--you-hit {
+  border-left-color: #4d7c0f;
+  color: #3f6212;
+}
+
+[data-theme='grimoire'] .rpg-log-line--foe-hit {
+  border-left-color: var(--g-primary-container);
+  color: var(--g-primary);
+}
+
+[data-theme='grimoire'] .rpg-log-line--evade {
+  border-left-color: var(--g-tertiary);
+  color: #0f766e;
+}
+
+[data-theme='grimoire'] .rpg-log-line--stun {
+  border-left-color: var(--g-outline);
+  color: var(--g-on-surface-variant);
+}
+
+[data-theme='grimoire'] .rpg-log-line--win {
+  border-left-color: #15803d;
+  color: #14532d;
+}
+
+[data-theme='grimoire'] .rpg-log-line--loss {
+  border-left-color: #b91c1c;
+  color: #7f1d1d;
+}
+
+[data-theme='grimoire'] .rpg-log-line--death {
+  border-left-color: #991b1b;
+  color: #450a0a;
+}
+
+[data-theme='grimoire'] .rpg-log-line--loot {
+  border-left-color: #b45309;
+  color: #92400e;
+}
+
+[data-theme='grimoire'] .rpg-log-line--xp {
+  border-left-color: #7c3aed;
+  color: #5b21b6;
+}
+
+[data-theme='grimoire'] .rpg-log-line--level {
+  border-left-color: var(--g-accent);
+  color: var(--g-primary);
+}
+
+[data-theme='grimoire'] .rpg-log-line--tip {
+  border-left-color: var(--g-outline);
+  color: var(--g-faded-ink);
+}
+
+[data-theme='grimoire'] .rpg-log-line--vendor,
+[data-theme='grimoire'] .rpg-log-line--gear,
+[data-theme='grimoire'] .rpg-log-line--study {
+  border-left-color: var(--g-outline-variant);
+  color: var(--g-on-surface);
+}
+
+[data-theme='grimoire'] .rpg-log-line--gold {
+  border-left-color: var(--g-accent);
+  color: var(--g-on-secondary-container);
+}
+
+[data-theme='grimoire'] .rpg-log-line--item {
+  border-left-color: #047857;
+  color: #065f46;
+}
+
+[data-theme='grimoire'] .rpg-log-line--rest {
+  border-left-color: var(--g-tertiary);
+  color: #0f766e;
+}
+
+[data-theme='grimoire'] .rpg-log-line--warn {
+  border-left-color: #be123c;
+  color: #9f1239;
+}
+
+[data-theme='grimoire'] .rpg-log-line--pvp,
+[data-theme='grimoire'] .rpg-log-line--pvp-hit {
+  border-left-color: #4f46e5;
+  color: #3730a3;
+}
+
+[data-theme='grimoire'] .rpg-actions button {
+  font-family: var(--g-font-ui);
+  font-size: 1rem;
+  font-weight: 400;
+  border-radius: var(--g-radius);
+  border: var(--g-border);
+  background: var(--g-secondary-container);
+  color: var(--g-on-secondary-container);
+  box-shadow: var(--g-shadow-soft);
+}
+
+[data-theme='grimoire'] .rpg-actions:not(.rpg-skill-picker) button:nth-child(3n + 2) {
+  background: var(--g-parchment-dim);
+  color: var(--g-primary);
+}
+
+[data-theme='grimoire'] .rpg-actions:not(.rpg-skill-picker) button:nth-child(3n + 3) {
+  background: var(--g-surface);
+  color: var(--g-tertiary);
+}
+
+[data-theme='grimoire'] .rpg-tiny {
+  font-family: var(--g-font-ui) !important;
+  border: var(--g-border) !important;
+  border-radius: var(--g-radius) !important;
+  background: var(--g-secondary-container) !important;
+  color: var(--g-on-secondary-container) !important;
+  box-shadow: var(--g-shadow-soft) !important;
+}
+
+[data-theme='grimoire'] button.rpg-fs-btn {
+  position: absolute;
+  z-index: 10;
+  top: max(0.45rem, env(safe-area-inset-top, 0));
+  right: max(0.55rem, env(safe-area-inset-right, 0));
+  left: auto;
+  border: var(--g-border);
+  border-radius: var(--g-radius);
+  background: var(--g-primary-container);
+  color: var(--g-on-primary);
+  box-shadow: var(--g-shadow-paper);
+}
+
+[data-theme='grimoire'] .rpg-menu-shell h1.rpg-menu-title {
+  font-family: var(--g-font-display);
+  font-size: clamp(1.35rem, 3vw, 2rem);
+  background: var(--g-surface-container);
+  color: var(--g-primary);
+}
+
+[data-theme='grimoire'] .rpg-menu-lead,
+[data-theme='grimoire'] .rpg-meta {
+  color: var(--g-faded-ink);
+}
+
+[data-theme='grimoire'] .rpg-menu-slot {
+  border: var(--g-border);
+  border-radius: var(--g-radius);
+  background: var(--g-surface);
+  box-shadow: var(--g-shadow-paper);
+}
+
+[data-theme='grimoire'] .rpg-menu-slot-actions button,
+[data-theme='grimoire'] .rpg-menu-actions button {
+  font-family: var(--g-font-ui);
+  border: var(--g-border);
+  border-radius: var(--g-radius);
+  box-shadow: var(--g-shadow-soft);
+}
+
+[data-theme='grimoire'] .rpg-menu-slot-actions .rpg-menu-play,
+[data-theme='grimoire'] .rpg-menu-play {
+  background: var(--g-primary-container);
+  color: var(--g-on-primary);
+}
+
+[data-theme='grimoire'] .rpg-play-layout::before {
+  opacity: 0.25;
+  filter: sepia(0.45);
+}
+
+[data-theme='grimoire'] .rpg-place-card {
+  border: var(--g-border);
+  border-radius: var(--g-radius);
+  background: var(--g-surface);
+  box-shadow: var(--g-shadow-paper);
+}
+
+[data-theme='grimoire'] .rpg-place-name {
+  font-family: var(--g-font-display);
+  color: var(--g-ink);
+}
+
+[data-theme='grimoire'] .rpg-shop-filters {
+  border: var(--g-border);
+  border-radius: var(--g-radius);
+  background: var(--g-parchment-dim);
+}
+
+[data-theme='grimoire'] .rpg-shop-search,
+[data-theme='grimoire'] .rpg-shop-select {
+  font-family: var(--g-font-body);
+  border: var(--g-border);
+  border-radius: var(--g-radius);
+  background: var(--g-surface);
+  color: var(--g-ink);
+}
+
+[data-theme='grimoire'] .rpg-shop-card {
+  border: var(--g-border);
+  border-radius: var(--g-radius);
+  background: var(--g-surface-container);
+  box-shadow: var(--g-shadow-soft);
+}
+
+[data-theme='grimoire'] .rpg-modal-overlay {
+  background: rgba(35, 25, 24, 0.42);
+}
+
+[data-theme='grimoire'] .rpg-modal {
+  border: var(--g-border);
+  border-radius: var(--g-radius);
+  background: var(--g-parchment);
+  box-shadow: var(--g-shadow-paper);
+}
+
+[data-theme='grimoire'] .rpg-modal-head {
+  border-bottom: var(--g-border);
+  background: var(--g-surface-container);
+}
+
+[data-theme='grimoire'] .rpg-modal-title {
+  font-family: var(--g-font-display);
+}
+
+[data-theme='grimoire'] .rpg-modal-done,
+[data-theme='grimoire'] .rpg-modal-close {
+  font-family: var(--g-font-ui);
+  border: var(--g-border);
+  border-radius: var(--g-radius);
+  background: var(--g-secondary-container);
+}
+
+[data-theme='grimoire'] .rpg-splash {
+  background: var(--g-parchment);
+}
+
+[data-theme='grimoire'] .rpg-splash__frame {
+  border: var(--g-border);
+  border-radius: var(--g-radius);
+  background: var(--g-surface-container);
+  box-shadow: var(--g-shadow-paper);
+}
+
+[data-theme='grimoire'] .rpg-splash__title {
+  font-family: var(--g-font-display);
+  color: var(--g-primary);
+}
+
+[data-theme='grimoire'] .rpg-game-boot-card {
+  border: var(--g-border);
+  background: var(--g-parchment);
+  box-shadow: var(--g-shadow-paper);
+}
+
+[data-theme='grimoire'] .rpg-panel.rpg-dashboard {
+  background: linear-gradient(180deg, var(--g-surface-container) 0%, var(--g-parchment-dim) 100%);
+}
+
+[data-theme='grimoire'] .rpg-dashboard-title {
+  font-family: var(--g-font-display);
+  color: var(--g-primary);
+}
+
+[data-theme='grimoire'] .rpg-xp-fill {
+  background: linear-gradient(90deg, var(--g-primary-container), var(--g-accent));
+}
+
+[data-theme='grimoire'] .rpg-hpbar__fill--high {
+  background: var(--g-primary-container);
+}
+
+[data-theme='grimoire'] .rpg-hpbar__fill--mid {
+  background: var(--g-accent);
+}
+
+[data-theme='grimoire'] .rpg-hpbar__fill--low {
+  background: #ba1a1a;
+}
+
+[data-theme='grimoire'] .rpg-stat-tome-card,
+[data-theme='grimoire'] .rpg-upgrade-card {
+  border: var(--g-border);
+  border-radius: var(--g-radius);
+  box-shadow: var(--g-shadow-paper);
+}
+
+[data-theme='grimoire'] .rpg-stat-tome-card__cta,
+[data-theme='grimoire'] .rpg-upgrade-card__cta {
+  font-family: var(--g-font-ui);
+  background: var(--g-primary-container);
+  color: var(--g-on-primary);
+  border: var(--g-border);
+}
+
+[data-theme='grimoire'] .rpg-ios-nav__title {
+  font-family: var(--g-font-display);
+  color: var(--g-primary);
+}
+
+[data-theme='grimoire'] .rpg-ios-nav__back {
+  font-family: var(--g-font-ui);
+  color: var(--g-primary-container);
+}
+
+[data-theme='grimoire'] .rpg-ios-settings__inset {
+  border: var(--g-border);
+  background: var(--g-surface);
+  box-shadow: var(--g-shadow-paper);
+}
+
+[data-theme='grimoire'] .rpg-theme-option,
+[data-theme='grimoire'] .rpg-ios-segment__btn {
+  font-family: var(--g-font-ui);
+  border: var(--g-border);
+  border-radius: var(--g-radius);
+  background: var(--g-parchment-dim);
+  color: var(--g-primary);
+}
+
+[data-theme='grimoire'] .rpg-theme-option--active,
+[data-theme='grimoire'] .rpg-ios-segment__btn--pressed {
+  background: var(--g-primary-container);
+  color: var(--g-on-primary);
+}
+
+[data-theme='grimoire'] .rpg-menu-settings-entry {
+  font-family: var(--g-font-ui);
+  border: var(--g-border);
+  background: var(--g-surface-container);
+  color: var(--g-primary);
+}
+
+[data-theme='grimoire'] .rpg-game-settings-link {
+  font-family: var(--g-font-ui);
+  border: var(--g-border);
+  background: var(--g-secondary-container);
+  color: var(--g-on-secondary-container);
+}
+
+/* Technique picker — ink frames, square corners (base CSS uses 10px / pill radius). */
+[data-theme='grimoire'] .rpg-skill-picker .rpg-skill-card {
+  border-radius: 0;
+  border: var(--g-border);
+  box-shadow: var(--g-shadow-paper);
+}
+
+[data-theme='grimoire'] .rpg-skill-picker .rpg-skill-card:hover:not(:disabled),
+[data-theme='grimoire'] .rpg-skill-picker .rpg-skill-card:active:not(:disabled) {
+  box-shadow: var(--g-shadow-paper);
+}
+
+[data-theme='grimoire'] .rpg-skill-card__idx {
+  border-radius: 0;
+  border: var(--g-border);
+}
+
+[data-theme='grimoire'] .rpg-skill-pill {
+  border-radius: 0;
+  border: var(--g-border);
+}
+
+[data-theme='grimoire'] button.rpg-skill-back {
+  border-radius: 0 !important;
+}
+
+/* —— PvP (duel) — parchment clash banner, readable hints, 2-col techniques —— */
+[data-theme='grimoire'] .pvp-clash-overlay {
+  align-items: flex-start;
+  justify-content: center;
+  padding: max(0.65rem, env(safe-area-inset-top, 0)) 1rem 1rem;
+  background: rgba(43, 38, 32, 0.42);
+}
+
+[data-theme='grimoire'] .pvp-clash-overlay__card {
+  margin-top: 0.15rem;
+  max-width: min(22rem, calc(100vw - 2rem));
+  padding: 0.85rem 1rem 1rem;
+  border: var(--g-border);
+  border-radius: var(--g-radius);
+  background: var(--g-parchment);
+  box-shadow: var(--g-shadow-paper);
+  font-family: var(--g-font-body);
+}
+
+[data-theme='grimoire'] .pvp-clash-overlay__eyebrow {
+  font-family: var(--g-font-display);
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  color: var(--g-primary);
+}
+
+[data-theme='grimoire'] .pvp-clash-overlay__name {
+  font-family: var(--g-font-ui);
+  color: var(--g-faded-ink);
+}
+
+[data-theme='grimoire'] .pvp-clash-overlay__strike {
+  font-family: var(--g-font-body);
+  color: var(--g-ink);
+}
+
+[data-theme='grimoire'] .pvp-clash-overlay__vs {
+  font-family: var(--g-font-display);
+  color: var(--g-primary-container);
+}
+
+[data-theme='grimoire'] .rpg-enemy--pvp {
+  border-color: var(--g-primary-container);
+  background: linear-gradient(165deg, var(--g-surface-container-high) 0%, var(--g-parchment-dim) 100%);
+}
+
+[data-theme='grimoire'] .rpg-pvp-duel-hint {
+  font-family: var(--g-font-body);
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: var(--g-on-surface-variant);
+  border: var(--g-border);
+  border-radius: var(--g-radius);
+  background: var(--g-surface);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+[data-theme='grimoire'] .rpg-pvp-status-line,
+[data-theme='grimoire'] .rpg-pvp-opp-status-line {
+  padding: 0.35rem 0.45rem;
+  border-left: 4px solid var(--g-tertiary);
+  background: rgba(255, 248, 247, 0.85);
+}
+
+[data-theme='grimoire'] .rpg-pvp-facet-line {
+  padding: 0.28rem 0.4rem;
+  border-left: 4px solid var(--g-accent);
+  background: rgba(253, 230, 138, 0.2);
+}
+
+[data-theme='grimoire'] .rpg-skill-picker__hint {
+  font-family: var(--g-font-display);
+  font-size: 0.82rem;
+  font-weight: 400;
+  letter-spacing: 0.06em;
+  color: var(--g-primary);
+  text-align: center;
+}
+
+[data-theme='grimoire'] .rpg-skill-picker__grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+[data-theme='grimoire']
+  .rpg-skill-picker__grid
+  .rpg-skill-card:last-child:nth-child(odd):not(:only-child) {
+  grid-column: 1 / -1;
+  max-width: min(100%, 22rem);
+  justify-self: center;
+}
+
+[data-theme='grimoire'] .rpg-pvp-rps__lead {
+  font-family: var(--g-font-body);
+  color: var(--g-on-surface-variant);
+}
+
+[data-theme='grimoire'] .rpg-controls-scroll .rpg-actions.rpg-skill-picker {
+  gap: 0.65rem;
+}
+
+/* Gear · pack inventory cards — parchment tiles (not mint strips). */
+[data-theme='grimoire'] .rpg-gear-pack-list--cards {
+  gap: 1.15rem;
+}
+
+[data-theme='grimoire'] .rpg-gear-pack-card {
+  border: var(--g-border);
+  border-radius: var(--g-radius);
+  border-top: 4px solid var(--g-accent);
+  background: linear-gradient(
+    165deg,
+    var(--g-surface-container) 0%,
+    var(--g-parchment-dim) 48%,
+    var(--g-surface) 100%
+  );
+  box-shadow: var(--g-shadow-paper);
+}
+
+[data-theme='grimoire'] .rpg-gear-pack-card__title {
+  font-family: var(--g-font-display);
+  font-size: 1.05rem;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  color: var(--g-primary);
+}
+
+[data-theme='grimoire'] .rpg-gear-pack-card__dur {
+  font-family: var(--g-font-ui);
+  font-weight: 600;
+  color: var(--g-faded-ink);
+}
+
+[data-theme='grimoire'] .rpg-gear-pack-card__flavor {
+  font-family: var(--g-font-body);
+  font-weight: 500;
+  color: var(--g-on-surface-variant);
+}
+
+[data-theme='grimoire'] .rpg-gear-pack-card__skill.rpg-gear-skill-line {
+  font-family: var(--g-font-body);
+  border: var(--g-border);
+  border-radius: var(--g-radius);
+  background: rgba(253, 230, 138, 0.22);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  color: var(--g-ink) !important;
+}
+
+[data-theme='grimoire'] .rpg-gear-pack-card__equip {
+  font-family: var(--g-font-ui);
+  font-weight: 400;
+  border: var(--g-border);
+  border-radius: var(--g-radius);
+  background: var(--g-primary-container);
+  color: var(--g-on-primary);
+  box-shadow: var(--g-shadow-soft);
+}
+
+[data-theme='grimoire'] .rpg-gear-pack-card__equip:hover:not(:disabled) {
+  transform: none;
+  filter: brightness(1.08);
+}
+
+[data-theme='grimoire'] .rpg-gear-pack-card__equip:active:not(:disabled) {
+  transform: none;
+  filter: brightness(0.95);
+}
+
+[data-theme='grimoire'] .rpg-gear-pack-card .rpg-gear-slot-pill,
+[data-theme='grimoire'] .rpg-gear-pack-card .rpg-gear-archetype-pill {
+  margin: 0;
+  border-radius: var(--g-radius);
+  border: var(--g-border);
+  box-shadow: none;
+  font-family: var(--g-font-ui);
+  font-size: 0.68rem;
+  font-weight: 400;
+}
+
+[data-theme='grimoire'] .rpg-gear-pack-card .rpg-gear-slot-pill {
+  background: var(--g-surface);
+  color: var(--g-ink);
+}
+
+[data-theme='grimoire'] .rpg-gear-pack-card .rpg-gear-archetype-pill {
+  background: var(--g-secondary-container);
+  color: var(--g-on-secondary-container);
+}

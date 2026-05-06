@@ -28,10 +28,21 @@ export interface PvpCombatSnapshot {
   /** Set when leaving RPS for strike — cleared after strike resolves; drives clash animation. */
   lastContest: PvpLastContest | null
   seq: number
+  /** Gold wager (0 = casual). Both players must have had ≥ this at duel start. */
+  duelBetGold: number
+  /** If true, loser loses all gold they had at duel start; winner receives that amount. If false, loser pays `duelBetGold` (capped by balance). */
+  stripeLoserMode: boolean
 }
 
 export type PvpGameMessage =
   | { type: 'profile'; profile: PlayerState }
+  /** Host sends once after connect: profile + duel rules so the guest applies the same wager. */
+  | {
+      type: 'host_ready'
+      profile: PlayerState
+      duelBetGold: number
+      stripeLoserMode: boolean
+    }
   | { type: 'turn'; snapshot: PvpCombatSnapshot; damage?: number }
   | { type: 'rps_pick'; choice: RpsChoice; contestSeq: number }
 
@@ -44,6 +55,20 @@ export function parseGameMessage(raw: string): PvpGameMessage | null {
     const v = JSON.parse(raw) as PvpGameMessage
     if (!v || typeof v !== 'object') return null
     if (v.type === 'profile' && v.profile) return v
+    if (
+      v.type === 'host_ready' &&
+      v.profile &&
+      typeof v.duelBetGold === 'number' &&
+      Number.isFinite(v.duelBetGold) &&
+      typeof v.stripeLoserMode === 'boolean'
+    ) {
+      return {
+        type: 'host_ready',
+        profile: v.profile,
+        duelBetGold: Math.max(0, Math.floor(v.duelBetGold)),
+        stripeLoserMode: v.stripeLoserMode,
+      }
+    }
     if (
       v.type === 'rps_pick' &&
       (v.choice === 'rock' || v.choice === 'paper' || v.choice === 'scissors') &&
@@ -85,6 +110,8 @@ export function normalizeSnapshot(snap: PvpCombatSnapshot): PvpCombatSnapshot {
     attackerIsHost,
     contestSeq: snap.contestSeq ?? 0,
     lastContest: snap.lastContest ?? null,
+    duelBetGold: snap.duelBetGold ?? 0,
+    stripeLoserMode: snap.stripeLoserMode ?? false,
   }
 }
 

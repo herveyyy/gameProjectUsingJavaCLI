@@ -21,6 +21,8 @@ export const STATUS_META: Record<
   stunned: { label: 'Stunned', kind: 'control', defaultPotency: 0, verb: 'Stun' },
   shielded: { label: 'Shielded', kind: 'buff', defaultPotency: 15, verb: 'Shield' },
   empowered: { label: 'Empowered', kind: 'buff', defaultPotency: 6, verb: 'Empower' },
+  immune: { label: 'Spellbound Aegis', kind: 'buff', defaultPotency: 0, verb: 'Immune' },
+  might: { label: 'Battle Might', kind: 'buff', defaultPotency: 10, verb: 'Might' },
 }
 
 export function formatStatusLine(entry: CombatStatusEntry): string {
@@ -29,6 +31,10 @@ export function formatStatusLine(entry: CombatStatusEntry): string {
   if (m.kind === 'dot' || entry.id === 'shielded' || entry.id === 'empowered') {
     const p = entry.potency ?? m.defaultPotency
     return `${m.label} (${entry.turns}t · ${p})`
+  }
+  if (entry.id === 'might') {
+    const p = entry.potency ?? m.defaultPotency
+    return `${m.label} (+${p} · ${entry.turns}t)`
   }
   return `${m.label} (${entry.turns}t)`
 }
@@ -47,14 +53,19 @@ export function mergeStatuses(current: CombatStatusEntry[], add: StatusApply[]):
     const prev = map.get(a.id)
     const meta = STATUS_META[a.id]
     if (!prev) {
-      map.set(a.id, { id: a.id, turns: a.turns, potency: pot })
+      const initialPot = a.id === 'immune' ? 0 : pot
+      map.set(a.id, { id: a.id, turns: a.turns, potency: initialPot })
     } else {
       const turns = Math.max(prev.turns, a.turns)
       let potency = prev.potency
-      if (meta?.kind === 'dot' || a.id === 'shielded' || a.id === 'empowered') {
+      if (meta?.kind === 'dot' || a.id === 'shielded' || a.id === 'empowered' || a.id === 'might') {
         potency = Math.max(prev.potency ?? 0, pot)
       }
-      map.set(a.id, { ...prev, turns, potency })
+      if (a.id === 'immune') {
+        map.set(a.id, { id: 'immune', turns, potency: 0 })
+      } else {
+        map.set(a.id, { ...prev, turns, potency })
+      }
     }
   }
   return [...map.values()]
@@ -229,4 +240,13 @@ export function splitSkillStatuses(skill: SkillDef): { onEnemy: StatusApply[]; o
     onEnemy: skill.statusOnHit?.target ? [...skill.statusOnHit.target] : [],
     onSelf: skill.statusOnHit?.self ? [...skill.statusOnHit.self] : [],
   }
+}
+
+/** Removes buffs and debuffs — cleanse scroll / priests. */
+export function cleanseAllStatuses(): CombatStatusEntry[] {
+  return []
+}
+
+export function hasImmuneBuff(statuses: CombatStatusEntry[]): boolean {
+  return statuses.some((s) => s.id === 'immune' && s.turns > 0)
 }

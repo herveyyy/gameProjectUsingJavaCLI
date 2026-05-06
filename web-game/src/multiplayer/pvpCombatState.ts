@@ -1,4 +1,6 @@
+import { filterIncomingPlayerApplies } from '../game/incomingStatuses'
 import { getCombatSkillEntries } from '../game/gear'
+import { aggregateThornReflectPercent } from '../game/innates'
 import {
   consumeEmpoweredBonus,
   consumeStunSkip,
@@ -18,7 +20,11 @@ export function clonePlayer(p: PlayerState): PlayerState {
   return JSON.parse(JSON.stringify(p)) as PlayerState
 }
 
-export function buildInitialSnapshot(hostProfile: PlayerState, guestProfile: PlayerState): PvpCombatSnapshot {
+export function buildInitialSnapshot(
+  hostProfile: PlayerState,
+  guestProfile: PlayerState,
+  duel: { duelBetGold: number; stripeLoserMode: boolean } = { duelBetGold: 0, stripeLoserMode: false },
+): PvpCombatSnapshot {
   const h = clonePlayer(hostProfile)
   const g = clonePlayer(guestProfile)
   return {
@@ -33,6 +39,8 @@ export function buildInitialSnapshot(hostProfile: PlayerState, guestProfile: Pla
     contestSeq: 0,
     lastContest: null,
     seq: 0,
+    duelBetGold: duel.duelBetGold,
+    stripeLoserMode: duel.stripeLoserMode,
   }
 }
 
@@ -200,19 +208,31 @@ export function applyStrikeFromSnapshot(
   }
 
   const defenderStatusesBefore = strikerIsHost ? guestStatuses : hostStatuses
+  const defenderProfile = strikerIsHost ? snap.guestProfile : snap.hostProfile
 
   const emp = consumeEmpoweredBonus(strikerStatuses)
   if (strikerIsHost) hostStatuses = emp.statuses
   else guestStatuses = emp.statuses
 
   const defenderHp = strikerIsHost ? guestHp : hostHp
-  const strike = applyPvpStrike(attacker, defenderHp, skillIndex, emp.bonus, defenderStatusesBefore)
+  const strike = applyPvpStrike(
+    attacker,
+    defenderHp,
+    skillIndex,
+    emp.bonus,
+    defenderStatusesBefore,
+    defenderProfile,
+    emp.statuses,
+  )
   if (!strike) return null
 
   const entries = getCombatSkillEntries(attacker)
   const entry = entries[skillIndex]
   if (!entry) return null
   const split = splitSkillStatuses(entry.skill)
+  const incomingCtrl = filterIncomingPlayerApplies(defenderProfile, defenderStatusesBefore, split.onEnemy)
+  const defenderProfileAfter = incomingCtrl.player
+  const onEnemyFiltered = incomingCtrl.applies
 
   let hostProfile = snap.hostProfile
   let guestProfile = snap.guestProfile
@@ -220,13 +240,35 @@ export function applyStrikeFromSnapshot(
   if (strikerIsHost) {
     hostProfile = strike.attackerAfter
     guestHp = strike.defenderHpAfter
-    guestStatuses = mergeStatuses(strike.defenderStatusesAfter ?? defenderStatusesBefore, split.onEnemy)
+    guestProfile = defenderProfileAfter
+    guestStatuses = mergeStatuses(strike.defenderStatusesAfter ?? defenderStatusesBefore, onEnemyFiltered)
     hostStatuses = mergeStatuses(hostStatuses, split.onSelf)
   } else {
     guestProfile = strike.attackerAfter
     hostHp = strike.defenderHpAfter
-    hostStatuses = mergeStatuses(strike.defenderStatusesAfter ?? defenderStatusesBefore, split.onEnemy)
+    hostProfile = defenderProfileAfter
+    hostStatuses = mergeStatuses(strike.defenderStatusesAfter ?? defenderStatusesBefore, onEnemyFiltered)
     guestStatuses = mergeStatuses(guestStatuses, split.onSelf)
+  }
+
+  const ls = strike.lifeStealHeal ?? 0
+  if (ls > 0) {
+    if (strikerIsHost) {
+      const cap = getMaxStats(hostProfile).maxHp
+      hostHp = Math.min(cap, hostHp + ls)
+    } else {
+      const cap = getMaxStats(guestProfile).maxHp
+      guestHp = Math.min(cap, guestHp + ls)
+    }
+  }
+
+  const thPct = aggregateThornReflectPercent(defenderProfileAfter)
+  if (thPct > 0 && strike.damage > 0) {
+    const echo = Math.floor(strike.damage * (thPct / 100))
+    if (echo > 0) {
+      if (strikerIsHost) hostHp = Math.max(0, hostHp - echo)
+      else guestHp = Math.max(0, guestHp - echo)
+    }
   }
 
   const winner = winnerFromHp(hostHp, guestHp)
