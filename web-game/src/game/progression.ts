@@ -1,4 +1,12 @@
-import { CLASSES, SHOP_CONSUMABLES, SHOP_UPGRADES, upgradePrice, xpRequiredForNextLevel } from './constants'
+import {
+  CLASSES,
+  SHOP_CONSUMABLES,
+  SHOP_UPGRADES,
+  getSkillTierIndexForLevel,
+  getSkillsForLevel,
+  upgradePrice,
+  xpRequiredForNextLevel,
+} from './constants'
 import type { PlayerState, ShopConsumableId, ShopUpgradeId, SkillDef } from './types'
 
 export interface MaxStats {
@@ -21,11 +29,18 @@ export function getMaxStats(player: PlayerState): MaxStats {
   }
 }
 
-/** Level scaling + Striking upgrade — matches displayed skill row. */
+/** Striking upgrade + light level scaling (skill tiers carry most growth). */
 export function getEffectiveSkillDamage(player: PlayerState, skill: SkillDef): number {
-  const levelMul = 1 + (player.level - 1) * 0.035
+  const levelMul = 1 + (player.level - 1) * 0.022
   const raw = skill.damage * levelMul + player.upgrades.striking
   return Math.max(0, Math.floor(raw))
+}
+
+export function syncClassSkills(player: PlayerState): PlayerState {
+  return {
+    ...player,
+    skills: getSkillsForLevel(player.classKey, player.level),
+  }
 }
 
 export function getEffectiveManaCost(player: PlayerState, skill: SkillDef): number {
@@ -60,6 +75,7 @@ export function addXp(player: PlayerState, amount: number): LevelUpResult {
   let levelsGained = 0
 
   while (p.xp >= p.xpToNext) {
+    const tierBefore = getSkillTierIndexForLevel(p.level)
     p.xp -= p.xpToNext
     const newLevel = p.level + 1
     p = {
@@ -74,10 +90,16 @@ export function addXp(player: PlayerState, amount: number): LevelUpResult {
     }
     levelsGained += 1
     messages.push(`LEVEL UP! You are now level ${newLevel}. Stats +1 all.`)
+    const tierAfter = getSkillTierIndexForLevel(newLevel)
+    if (tierAfter > tierBefore) {
+      const roman = ['I', 'II', 'III', 'IV', 'V'][tierAfter]
+      messages.push(`Skill tier ${roman} — new techniques for your ${p.classLabel}.`)
+    }
     const max = getMaxStats(p)
     p = { ...p, hp: max.maxHp, stamina: max.maxStamina, mana: max.maxMana }
   }
 
+  p = syncClassSkills(p)
   return { player: applyMaxCaps(p), levelsGained, messages }
 }
 

@@ -1,4 +1,4 @@
-export type ClassKey = 'warrior' | 'rogue' | 'mage'
+export type ClassKey = 'warrior' | 'rogue' | 'mage' | 'ranger'
 
 export interface SkillDef {
   name: string

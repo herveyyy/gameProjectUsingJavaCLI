@@ -54,6 +54,16 @@ export function ClassPortrait({ classKey, size = 56 }: { classKey: ClassKey; siz
       </svg>
     )
   }
+  if (classKey === 'ranger') {
+    return (
+      <svg {...common}>
+        <rect x="6" y="8" width="36" height="36" rx="6" fill="#d9f99d" stroke={ink} strokeWidth="3" />
+        <path d="M12 18 L24 12 L36 18 L36 34 L12 34 Z" fill="#86efac" stroke={ink} strokeWidth="2" />
+        <path d="M22 14 L28 8 L30 12 Z" fill="#15803d" stroke={ink} strokeWidth="1.5" />
+        <circle cx="18" cy="26" r="3" fill="#fef08a" stroke={ink} strokeWidth="1.5" />
+      </svg>
+    )
+  }
   return (
     <svg {...common}>
       <rect x="6" y="8" width="36" height="36" rx="6" fill="#e9d5ff" stroke={ink} strokeWidth="3" />

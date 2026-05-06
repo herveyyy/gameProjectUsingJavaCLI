@@ -1,4 +1,4 @@
-import { applyMaxCaps } from './progression'
+import { applyMaxCaps, syncClassSkills } from './progression'
 import type { PlayerInventory, PlayerState, PlayerUpgrades, SkillDef } from './types'
 
 export const STORAGE_KEY = 'woods-rpg-save-v1'
@@ -40,7 +40,7 @@ function isValidPlayer(p: unknown): p is PlayerState {
   const o = p as Record<string, unknown>
   if (typeof o.name !== 'string' || o.name.length === 0) return false
   const ck = o.classKey
-  if (ck !== 'warrior' && ck !== 'rogue' && ck !== 'mage') return false
+  if (ck !== 'warrior' && ck !== 'rogue' && ck !== 'mage' && ck !== 'ranger') return false
   if (typeof o.classLabel !== 'string') return false
   if (typeof o.hp !== 'number' || typeof o.stamina !== 'number' || typeof o.mana !== 'number') return false
   if (typeof o.level !== 'number' || typeof o.gold !== 'number') return false
@@ -64,7 +64,7 @@ export function loadProgress(): PlayerState | null {
     const rec = data as Record<string, unknown>
     if (rec.version !== 1) return null
     if (!isValidPlayer(rec.player)) return null
-    return applyMaxCaps(rec.player as PlayerState)
+    return applyMaxCaps(syncClassSkills(rec.player as PlayerState))
   } catch {
     return null
   }

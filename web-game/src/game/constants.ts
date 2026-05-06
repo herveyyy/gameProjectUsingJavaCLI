@@ -1,5 +1,144 @@
-import type { ClassKey } from './types'
-import type { EnemyState, PlaceDef, PlayerState, ShopConsumableDef, ShopUpgradeDef } from './types'
+import type { ClassKey, EnemyState, PlaceDef, PlayerState, ShopConsumableDef, ShopUpgradeDef, SkillDef } from './types'
+
+/** Five tiers — every 3 class levels (Lv 1–3, 4–6, 7–9, 10–12, 13+). */
+export const CLASS_SKILL_TIERS: Record<ClassKey, readonly SkillDef[][]> = {
+  warrior: [
+    [
+      { name: 'Horizontal Slash I', damage: 7, manaCost: 10.5 },
+      { name: 'Vertical Slash I', damage: 8, manaCost: 12 },
+      { name: 'Shield Bash I', damage: 2, manaCost: 2 },
+    ],
+    [
+      { name: 'Horizontal Slash II', damage: 11, manaCost: 10 },
+      { name: 'Vertical Slash II', damage: 13, manaCost: 11.5 },
+      { name: 'Shield Bash II', damage: 5, manaCost: 2 },
+    ],
+    [
+      { name: 'Reaping Arc III', damage: 16, manaCost: 9.5 },
+      { name: 'Cleave III', damage: 19, manaCost: 10.5 },
+      { name: 'Guard Break III', damage: 9, manaCost: 2.5 },
+    ],
+    [
+      { name: 'Whirlwind Rend IV', damage: 22, manaCost: 9 },
+      { name: 'Sky Splitter IV', damage: 26, manaCost: 10 },
+      { name: 'Fortress Slam IV', damage: 14, manaCost: 2 },
+    ],
+    [
+      { name: 'Excalibur Cleave V', damage: 30, manaCost: 8.5 },
+      { name: 'World Splitter V', damage: 35, manaCost: 9.5 },
+      { name: 'Cataclysm Bash V', damage: 20, manaCost: 2 },
+    ],
+  ],
+  rogue: [
+    [
+      { name: 'Dagger Slash I', damage: 7, manaCost: 10.5 },
+      { name: 'Poison Blade I', damage: 8, manaCost: 12 },
+      { name: 'Evasion I', damage: 0, manaCost: 0 },
+    ],
+    [
+      { name: 'Twin Fang II', damage: 11, manaCost: 10 },
+      { name: 'Venom Weave II', damage: 13, manaCost: 11 },
+      { name: 'Shadow Step II', damage: 0, manaCost: 0 },
+    ],
+    [
+      { name: 'Gutting Strike III', damage: 15, manaCost: 9.5 },
+      { name: 'Night Toxin III', damage: 18, manaCost: 10 },
+      { name: 'Blur III', damage: 0, manaCost: 0 },
+    ],
+    [
+      { name: 'Assassin\'s Puncture IV', damage: 20, manaCost: 9 },
+      { name: 'Crimson Bloom IV', damage: 24, manaCost: 9.5 },
+      { name: 'Mirage IV', damage: 0, manaCost: 0 },
+    ],
+    [
+      { name: 'Death Lottery V', damage: 26, manaCost: 8.5 },
+      { name: 'Plague Edge V', damage: 32, manaCost: 9 },
+      { name: 'Vanish V', damage: 0, manaCost: 0 },
+    ],
+  ],
+  mage: [
+    [
+      { name: 'Fireball I', damage: 5, manaCost: 7.5 },
+      { name: 'Gust Lance I', damage: 6, manaCost: 9 },
+      { name: 'Splash I', damage: 4, manaCost: 6 },
+    ],
+    [
+      { name: 'Scorch Bolt II', damage: 9, manaCost: 7 },
+      { name: 'Wind Shear II', damage: 11, manaCost: 8.5 },
+      { name: 'Tidal Wave II', damage: 8, manaCost: 5.5 },
+    ],
+    [
+      { name: 'Inferno Lance III', damage: 14, manaCost: 6.5 },
+      { name: 'Cyclone III', damage: 17, manaCost: 8 },
+      { name: 'Aqua Prison III', damage: 12, manaCost: 5 },
+    ],
+    [
+      { name: 'Pyroclasm IV', damage: 20, manaCost: 6 },
+      { name: 'Tempest IV', damage: 24, manaCost: 7.5 },
+      { name: 'Deluge IV', damage: 17, manaCost: 4.5 },
+    ],
+    [
+      { name: 'Sunfall V', damage: 27, manaCost: 5.5 },
+      { name: 'Sky Rend V', damage: 32, manaCost: 7 },
+      { name: 'Tsunami V', damage: 23, manaCost: 4 },
+    ],
+  ],
+  ranger: [
+    [
+      { name: 'Pine Needle Shot I', damage: 7, manaCost: 10.5 },
+      { name: 'Snaring Roots I', damage: 8, manaCost: 12 },
+      { name: 'Companion Peck I', damage: 2, manaCost: 2 },
+    ],
+    [
+      { name: 'Twin Volley II', damage: 11, manaCost: 10 },
+      { name: 'Thorn Ward II', damage: 13, manaCost: 11 },
+      { name: 'Wolf Fangs II', damage: 5, manaCost: 2 },
+    ],
+    [
+      { name: 'Piercing Gale III', damage: 16, manaCost: 9.5 },
+      { name: 'Briar Crown III', damage: 18, manaCost: 10 },
+      { name: 'Stampede III', damage: 9, manaCost: 2.5 },
+    ],
+    [
+      { name: 'Starfall Arrow IV', damage: 22, manaCost: 9 },
+      { name: 'Entangling Sky IV', damage: 25, manaCost: 10 },
+      { name: 'Bear Maul IV', damage: 14, manaCost: 2 },
+    ],
+    [
+      { name: 'Eclipse Shot V', damage: 30, manaCost: 8.5 },
+      { name: 'Verdant Ruin V', damage: 34, manaCost: 9 },
+      { name: 'Apex Predator V', damage: 20, manaCost: 2 },
+    ],
+  ],
+}
+
+/** Three branches per class — columns in the skill tree (Bow / control / beast for Ranger, etc.). */
+export const CLASS_SKILL_TREE_BRANCHES: Record<ClassKey, readonly [string, string, string]> = {
+  warrior: ['Blade arts', 'Heavy strikes', 'Shield'],
+  rogue: ['Steel', 'Toxins', 'Shadow'],
+  mage: ['Fire', 'Wind', 'Water'],
+  ranger: ['Bow', 'Wild', 'Companion'],
+}
+
+export const SKILL_TIER_ROMAN = ['I', 'II', 'III', 'IV', 'V'] as const
+
+/** Tier column subtitle for the skill tree UI (matches 3-level tier bands). */
+export function tierLevelRangeLabel(tierIndex: number): string {
+  if (tierIndex >= SKILL_TIER_ROMAN.length - 1) return 'Lv 13+'
+  const lo = tierIndex * 3 + 1
+  const hi = tierIndex * 3 + 3
+  return `Lv ${lo}–${hi}`
+}
+
+export function getSkillTierIndexForLevel(level: number): number {
+  return Math.min(CLASS_SKILL_TIERS.warrior.length - 1, Math.max(0, Math.floor((level - 1) / 3)))
+}
+
+export function getSkillsForLevel(classKey: ClassKey, level: number): SkillDef[] {
+  const tiers = CLASS_SKILL_TIERS[classKey]
+  const idx = getSkillTierIndexForLevel(level)
+  return tiers[idx].map((s) => ({ ...s }))
+}
 
 export const CLASSES: Record<
   ClassKey,
@@ -12,6 +151,7 @@ export const CLASSES: Record<
     | 'xpToNext'
     | 'upgrades'
     | 'inventory'
+    | 'skills'
   > & {
     label: string
   }
@@ -24,11 +164,6 @@ export const CLASSES: Record<
     level: 1,
     gold: 10,
     stats: { strength: 5, agility: 3, intelligence: 2 },
-    skills: [
-      { name: 'Horizontal Slash', damage: 7, manaCost: 10.5 },
-      { name: 'Vertical Slash', damage: 8, manaCost: 12 },
-      { name: 'Shield Bash', damage: 1, manaCost: 1.5 },
-    ],
   },
   rogue: {
     label: 'Rogue',
@@ -38,11 +173,6 @@ export const CLASSES: Record<
     level: 1,
     gold: 10,
     stats: { strength: 2, agility: 5, intelligence: 3 },
-    skills: [
-      { name: 'DaggerSlash', damage: 7, manaCost: 10.5 },
-      { name: 'PoisonBlade', damage: 8, manaCost: 12 },
-      { name: 'Evasion', damage: 0, manaCost: 0 },
-    ],
   },
   mage: {
     label: 'Mage',
@@ -52,11 +182,15 @@ export const CLASSES: Record<
     level: 1,
     gold: 10,
     stats: { strength: 3, agility: 2, intelligence: 5 },
-    skills: [
-      { name: 'FireBall', damage: 5, manaCost: 7.5 },
-      { name: 'CompressedWind', damage: 6, manaCost: 9 },
-      { name: 'WaterSplash', damage: 4, manaCost: 6 },
-    ],
+  },
+  ranger: {
+    label: 'Ranger',
+    hp: 95,
+    stamina: 115,
+    mana: 85,
+    level: 1,
+    gold: 10,
+    stats: { strength: 3, agility: 4, intelligence: 3 },
   },
 }
 
@@ -229,7 +363,7 @@ export function buildPlayer(classKey: ClassKey, name: string): PlayerState {
     xp: 0,
     xpToNext: xpRequiredForNextLevel(1),
     stats: { ...def.stats },
-    skills: def.skills.map((s) => ({ ...s })),
+    skills: getSkillsForLevel(classKey, def.level),
     upgrades: { vitality: 0, striking: 0, arcana: 0, endurance: 0 },
     inventory: { healthPotion: 0, manaDraught: 0, staminaBrew: 0 },
   }

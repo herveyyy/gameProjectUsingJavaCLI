@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import { ClassPortrait, IconCoin, IconXpSpark, ShopIcon } from './components/GameIcons'
+import { SkillTreePanel } from './components/SkillTreePanel'
 import {
   PLACES,
   SHOP_CONSUMABLES,
   SHOP_UPGRADES,
   buildPlayer,
+  getSkillTierIndexForLevel,
   rollEncounterForPlace,
   spawnEnemyFromRoll,
   upgradePrice,
@@ -49,6 +51,7 @@ export default function App() {
   const [player, setPlayer] = useState<PlayerState | null>(null)
   const [enemy, setEnemy] = useState<EnemyState | null>(null)
   const [battle, setBattle] = useState<BattleState | null>(null)
+  const [skillTreeOpen, setSkillTreeOpen] = useState(false)
   const logRef = useRef<HTMLDivElement>(null)
   const [logLines, setLogLines] = useState<string[]>([
     "Unknown Entity: What's your name, human?",
@@ -67,6 +70,20 @@ export default function App() {
       setHasSave(true)
     }
   }, [player, screen])
+
+  useEffect(() => {
+    if (!skillTreeOpen) return
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSkillTreeOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => {
+      document.body.style.overflow = prevOverflow
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [skillTreeOpen])
 
   const resetToName = useCallback(() => {
     clearProgress()
@@ -187,6 +204,19 @@ export default function App() {
     setBattle(null)
     setPhase('adventure')
   }, [appendLog])
+
+  const restAtInn = useCallback(() => {
+    if (!player) return
+    const m = getMaxStats(player)
+    const hpFull = player.hp >= m.maxHp
+    const mpFull = player.mana >= m.maxMana
+    if (hpFull && mpFull) {
+      appendLog('You relax at the inn. HP and MP are already topped off.')
+      return
+    }
+    setPlayer(applyMaxCaps({ ...player, hp: m.maxHp, mana: m.maxMana }))
+    appendLog('You rest at the inn. HP and MP are fully restored.')
+  }, [appendLog, player])
 
   const confirmGoHome = useCallback(() => {
     appendLog('Go home and restart the expedition?')
@@ -333,6 +363,9 @@ export default function App() {
           <button type="button" onClick={() => chooseClass('mage')}>
             3. Mage
           </button>
+          <button type="button" onClick={() => chooseClass('ranger')}>
+            4. Ranger
+          </button>
         </div>
       )
     }
@@ -365,7 +398,7 @@ export default function App() {
             <button type="button" onClick={() => setPhase('shop')}>
               Open shop
             </button>
-            <button type="button" onClick={() => appendLog('You stay at the inn.')}>
+            <button type="button" onClick={restAtInn}>
               Rest at inn
             </button>
             <button type="button" onClick={exitToMenu}>
@@ -566,9 +599,9 @@ export default function App() {
 
   if (screen === 'menu') {
     return (
-      <div className="app-root">
-        <div className="rpg-shell rpg-menu-shell">
-          <h1 className="rpg-menu-title">Woods RPG</h1>
+      <div className="app-root app-root--fullscreen">
+        <div className="rpg-shell rpg-shell--fullscreen rpg-menu-shell">
+          <h1 className="rpg-menu-title">Frappe Text Adventure RPG</h1>
           <p className="rpg-menu-lead">Step into the woods. Your run is saved in this browser automatically.</p>
           {hasSave && <p className="rpg-menu-save">Found a saved adventurer on this device.</p>}
           <div className="rpg-menu-actions">
@@ -588,24 +621,20 @@ export default function App() {
   }
 
   return (
-    <div className="app-root">
-      <div className="rpg-shell">
-        <header className="rpg-hud">
-          <div className="rpg-hud-title">
-            <h1>Woods RPG</h1>
-            {player && (
-              <div className="rpg-hud-hero">
-                <ClassPortrait classKey={player.classKey} size={52} />
+    <div className="app-root app-root--fullscreen">
+      <div className="rpg-shell rpg-shell--fullscreen">
+        {player && maxStats ? (
+          <section className="rpg-panel rpg-dashboard" aria-label="Character">
+            <div className="rpg-dashboard-top">
+              <h1 className="rpg-dashboard-title">Frappe Text Adventure RPG</h1>
+              <div className="rpg-dashboard-identity">
+                <ClassPortrait classKey={player.classKey} size={48} />
                 <div className="rpg-hud-id">
                   <span className="rpg-hud-name">{player.name}</span>
                   <span className="rpg-hud-class">{player.classLabel}</span>
                 </div>
               </div>
-            )}
-          </div>
-          {player && (
-            <div className="rpg-hud-stats">
-              <div className="rpg-hud-row">
+              <div className="rpg-dashboard-lv-gold">
                 <span className="rpg-hud-badge">
                   Lv <strong>{player.level}</strong>
                 </span>
@@ -613,52 +642,64 @@ export default function App() {
                   <IconCoin /> <strong>{player.gold}</strong>
                 </span>
               </div>
-              <div className="rpg-xp-wrap" title="Experience">
-                <IconXpSpark />
-                <div className="rpg-xp-bar">
-                  <div className="rpg-xp-fill" style={{ width: `${xpPct}%` }} />
-                </div>
-                <span className="rpg-xp-text">
-                  {player.xp}/{player.xpToNext} XP
+            </div>
+            <div className="rpg-dashboard-xp" title="Experience">
+              <IconXpSpark />
+              <div className="rpg-xp-bar">
+                <div className="rpg-xp-fill" style={{ width: `${xpPct}%` }} />
+              </div>
+              <span className="rpg-xp-text">
+                {player.xp}/{player.xpToNext} XP
+              </span>
+            </div>
+            <div className="rpg-dashboard-stats">
+              <div className="rpg-statline">
+                <span>
+                  HP <strong>{fmt(player.hp)}</strong> / {fmt(maxStats.maxHp)}
+                </span>
+                <span>
+                  STA <strong>{fmt(player.stamina)}</strong> / {fmt(maxStats.maxStamina)}
+                </span>
+                <span>
+                  MP <strong>{fmt(player.mana)}</strong> / {fmt(maxStats.maxMana)}
                 </span>
               </div>
-            </div>
-          )}
-        </header>
-
-        {player && maxStats && (
-          <div className="rpg-panel rpg-player">
-            <div className="rpg-statline">
-              <span>
-                HP <strong>{fmt(player.hp)}</strong> / {fmt(maxStats.maxHp)}
-              </span>
-              <span>
-                STA <strong>{fmt(player.stamina)}</strong> / {fmt(maxStats.maxStamina)}
-              </span>
-              <span>
-                MP <strong>{fmt(player.mana)}</strong> / {fmt(maxStats.maxMana)}
-              </span>
-            </div>
-            <div className="rpg-statline" style={{ marginTop: '0.35rem' }}>
-              <span>STR {player.stats.strength}</span>
-              <span>AGI {player.stats.agility}</span>
-              <span>INT {player.stats.intelligence}</span>
-            </div>
-            <div className="rpg-upgrades" title="Permanent upgrades">
-              <span>VIT {player.upgrades.vitality}</span>
-              <span>STR↑ {player.upgrades.striking}</span>
-              <span>ARC {player.upgrades.arcana}</span>
-              <span>END {player.upgrades.endurance}</span>
-            </div>
-            {(player.inventory.healthPotion > 0 ||
-              player.inventory.manaDraught > 0 ||
-              player.inventory.staminaBrew > 0) && (
-              <div className="rpg-pack">
-                Pack: Red ×{player.inventory.healthPotion} · Blue ×{player.inventory.manaDraught} · Green ×
-                {player.inventory.staminaBrew}
+              <div className="rpg-statline" style={{ marginTop: '0.35rem' }}>
+                <span>STR {player.stats.strength}</span>
+                <span>AGI {player.stats.agility}</span>
+                <span>INT {player.stats.intelligence}</span>
               </div>
-            )}
-          </div>
+              <div className="rpg-skill-tier-row">
+                <div className="rpg-skill-tier" title="Skill tiers advance every 3 class levels (I → V).">
+                  Class skills · Tier{' '}
+                  <strong>{['I', 'II', 'III', 'IV', 'V'][getSkillTierIndexForLevel(player.level)]}</strong>
+                </div>
+                <button type="button" className="rpg-skill-tree-trigger" onClick={() => setSkillTreeOpen(true)}>
+                  Skill tree
+                </button>
+              </div>
+              <div className="rpg-upgrades" title="Permanent upgrades">
+                <span>VIT {player.upgrades.vitality}</span>
+                <span>STR↑ {player.upgrades.striking}</span>
+                <span>ARC {player.upgrades.arcana}</span>
+                <span>END {player.upgrades.endurance}</span>
+              </div>
+              {(player.inventory.healthPotion > 0 ||
+                player.inventory.manaDraught > 0 ||
+                player.inventory.staminaBrew > 0) && (
+                  <div className="rpg-pack">
+                    Pack: Red ×{player.inventory.healthPotion} · Blue ×{player.inventory.manaDraught} · Green ×
+                    {player.inventory.staminaBrew}
+                  </div>
+                )}
+            </div>
+          </section>
+        ) : (
+          <header className="rpg-hud rpg-hud-minimal">
+            <div className="rpg-hud-title">
+              <h1>Frappe Text Adventure RPG</h1>
+            </div>
+          </header>
         )}
 
         {!player && phase === 'name' && (
@@ -667,74 +708,151 @@ export default function App() {
           </div>
         )}
 
-        {enemy && battle && phase !== 'adventure' && phase !== 'class' && phase !== 'name' && phase !== 'shop' && (
-          <div className="rpg-panel rpg-enemy">
-            <div className="rpg-statline">
-              <span>
-                <strong>{enemy.name}</strong>
-              </span>
-              <span className="rpg-loot-tag">
-                +{enemy.goldReward} <IconCoin size={16} /> · +{enemy.xpReward} XP
-              </span>
+        <div className="rpg-play-layout">
+          <aside className="rpg-log-column" aria-label="Adventure journal">
+            <div className="rpg-panel rpg-log-panel">
+              <div className="rpg-log-heading">Journal</div>
+              <div className="rpg-log" ref={logRef}>
+                {logLines.join('\n')}
+              </div>
             </div>
-            <div className="rpg-statline" style={{ marginTop: '0.35rem' }}>
-              <span>
-                HP <strong>{fmt(battle.enemyHp)}</strong>
-              </span>
-              <span>Skill: {enemy.skill}</span>
-            </div>
-          </div>
-        )}
+          </aside>
 
-        <div className="rpg-panel">
-          <div className="rpg-log" ref={logRef}>
-            {logLines.join('\n')}
+          <div className="rpg-controls-column">
+            {enemy && battle && phase !== 'adventure' && phase !== 'class' && phase !== 'name' && phase !== 'shop' && (
+              <div className="rpg-panel rpg-enemy">
+                <div className="rpg-statline">
+                  <span>
+                    <strong>{enemy.name}</strong>
+                  </span>
+                  <span className="rpg-loot-tag">
+                    +{enemy.goldReward} <IconCoin size={16} /> · +{enemy.xpReward} XP
+                  </span>
+                </div>
+                <div className="rpg-enemy-hp" style={{ marginTop: '0.4rem' }}>
+                  <div className="rpg-enemy-hp-head">
+                    <span className="rpg-enemy-hp-title">HP</span>
+                    <span className="rpg-enemy-hp-values">
+                      <strong>{fmt(battle.enemyHp)}</strong>
+                      <span className="rpg-enemy-hp-sep">/</span>
+                      {fmt(enemy.maxHp)}
+                    </span>
+                  </div>
+                  <div
+                    className="rpg-hpbar"
+                    role="progressbar"
+                    aria-valuemin={0}
+                    aria-valuemax={enemy.maxHp}
+                    aria-valuenow={battle.enemyHp}
+                    aria-label={`${enemy.name} hit points`}
+                  >
+                    <div
+                      className={`rpg-hpbar__fill rpg-hpbar__fill--${enemy.maxHp <= 0
+                          ? 'mid'
+                          : battle.enemyHp / enemy.maxHp > 0.66
+                            ? 'high'
+                            : battle.enemyHp / enemy.maxHp > 0.33
+                              ? 'mid'
+                              : 'low'
+                        }`}
+                      style={{
+                        width: `${enemy.maxHp > 0 ? Math.max(0, Math.min(100, (battle.enemyHp / enemy.maxHp) * 100)) : 0}%`,
+                      }}
+                    />
+                  </div>
+                </div>
+                <div className="rpg-statline" style={{ marginTop: '0.35rem' }}>
+                  <span />
+                  <span>
+                    Skill: <strong>{enemy.skill}</strong>
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {phase === 'shop' && player && (
+              <div className="rpg-shop">
+                <h2 className="rpg-shop-heading">Traveling merchant</h2>
+                <p className="rpg-shop-lead">Spend gold on tonics and permanent upgrades. Prices scale per rank.</p>
+                <div className="rpg-shop-grid">
+                  {SHOP_CONSUMABLES.map((c) => (
+                    <div key={c.id} className="rpg-shop-card">
+                      <ShopIcon kind={c.icon} />
+                      <div className="rpg-shop-card-body">
+                        <strong>{c.name}</strong>
+                        <p>{c.description}</p>
+                        <button type="button" onClick={() => buyConsumable(c.id)}>
+                          Buy — {c.price} gold
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  {SHOP_UPGRADES.map((u) => {
+                    const rank = player.upgrades[u.id]
+                    const price = upgradePrice(u.basePrice, rank)
+                    return (
+                      <div key={u.id} className="rpg-shop-card rpg-shop-card-wide">
+                        <ShopIcon kind={u.icon} />
+                        <div className="rpg-shop-card-body">
+                          <strong>
+                            {u.name} <span className="rpg-rank">rank {rank}</span>
+                          </strong>
+                          <p>{u.description}</p>
+                          <button type="button" onClick={() => buyUpgrade(u.id)}>
+                            Upgrade — {price} gold
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
+            <div className="rpg-controls-body">{actions}</div>
           </div>
         </div>
 
-        {phase === 'shop' && player && (
-          <div className="rpg-shop">
-            <h2 className="rpg-shop-heading">Traveling merchant</h2>
-            <p className="rpg-shop-lead">Spend gold on tonics and permanent upgrades. Prices scale per rank.</p>
-            <div className="rpg-shop-grid">
-              {SHOP_CONSUMABLES.map((c) => (
-                <div key={c.id} className="rpg-shop-card">
-                  <ShopIcon kind={c.icon} />
-                  <div className="rpg-shop-card-body">
-                    <strong>{c.name}</strong>
-                    <p>{c.description}</p>
-                    <button type="button" onClick={() => buyConsumable(c.id)}>
-                      Buy — {c.price} gold
-                    </button>
-                  </div>
-                </div>
-              ))}
-              {SHOP_UPGRADES.map((u) => {
-                const rank = player.upgrades[u.id]
-                const price = upgradePrice(u.basePrice, rank)
-                return (
-                  <div key={u.id} className="rpg-shop-card rpg-shop-card-wide">
-                    <ShopIcon kind={u.icon} />
-                    <div className="rpg-shop-card-body">
-                      <strong>
-                        {u.name} <span className="rpg-rank">rank {rank}</span>
-                      </strong>
-                      <p>{u.description}</p>
-                      <button type="button" onClick={() => buyUpgrade(u.id)}>
-                        Upgrade — {price} gold
-                      </button>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        )}
-
-        {actions}
-
         <p className="rpg-meta">Browser RPG — progression auto-saves while you play.</p>
       </div>
+
+      {player && skillTreeOpen && (
+        <div
+          className="rpg-modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="rpg-skill-tree-dialog-title"
+          onClick={() => setSkillTreeOpen(false)}
+        >
+          <div className="rpg-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="rpg-modal-head">
+              <h2 id="rpg-skill-tree-dialog-title" className="rpg-modal-title">
+                Skill tree — {player.classLabel}
+              </h2>
+              <button
+                type="button"
+                className="rpg-modal-close"
+                onClick={() => setSkillTreeOpen(false)}
+                aria-label="Close skill tree"
+              >
+                ×
+              </button>
+            </div>
+            <p className="rpg-modal-lead">
+              Three branches per tier. You wield the tier that matches your level; lower tiers are mastered, higher ones
+              locked.
+            </p>
+            <div className="rpg-modal-body">
+              <SkillTreePanel player={player} compact />
+            </div>
+            <div className="rpg-modal-foot">
+              <button type="button" className="rpg-modal-done" onClick={() => setSkillTreeOpen(false)}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
