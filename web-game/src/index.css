@@ -1,0 +1,22 @@
+:root {
+  font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+  line-height: 1.45;
+  font-weight: 500;
+  color: #0a0a0a;
+  background-color: #fde047;
+  background-image: radial-gradient(#0a0a0a 1.25px, transparent 1.25px);
+  background-size: 14px 14px;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+}
+
+#root {
+  width: 100%;
+  min-height: 100svh;
+}
